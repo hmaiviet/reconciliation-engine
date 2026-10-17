@@ -1,6 +1,6 @@
 import { Decimal } from 'decimal.js';
 
-// D5: rounding only happens when formatting the report; 40 digits keeps epoch seconds with sub-ns fractions exact.
+// D5: rounding only happens when formatting the report; 40 digits keeps epoch seconds with nanosecond fractions exact.
 Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
 
 export { Decimal };
@@ -55,9 +55,10 @@ export function formatInputError(e: InputError): string {
   return [where, e.field, e.message].filter(Boolean).join(': ');
 }
 
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+// D7: at most 9 fractional digits keeps every accepted instant exact under the 40-digit precision above.
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z$/;
 
-/** Parses `YYYY-MM-DDTHH:MM:SS[.fraction]Z` to epoch seconds without losing precision; null if invalid. */
+/** Parses `YYYY-MM-DDTHH:MM:SS[.fraction]Z` (up to 9 fractional digits) to exact epoch seconds; null if invalid. */
 export function parseTimestamp(text: string): Decimal | null {
   const m = TIMESTAMP.exec(text);
   if (!m) return null;

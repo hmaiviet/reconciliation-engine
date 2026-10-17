@@ -64,7 +64,7 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 
 ## D5: Precision and rounding
 **Status:** agreed
-**Decision:** Amounts and timestamps are compared at full input precision (timestamps may have any number of fractional-second digits). Only the report rounds: `amount_diff` to 2 dp, `timestamp_diff_seconds` to 3 dp, half-up (away from zero). Zero is never printed as negative. `as_of` is normalized to millisecond form (`...:SS.sssZ`).
+**Decision:** Amounts and timestamps are compared at full input precision (timestamps may have up to 9 fractional-second digits, D7). Only the report rounds: `amount_diff` to 2 dp, `timestamp_diff_seconds` to 3 dp, half-up (away from zero). Zero is never printed as negative. `as_of` is normalized to millisecond form (`...:SS.sssZ`).
 **Examples:**
 | input | report |
 | --- | --- |
@@ -83,7 +83,7 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 - Transaction files need a header with `id`, `amount`, `timestamp`; `memo` is optional. Extended columns are all-or-nothing. Unknown columns are ignored. A header-only file has zero records; an empty file is an error.
 - `amount` and `price_per_share`: exactly 2 decimal places; `fx_rate`: exactly 6 (`-?digits.digits`, as ASSIGNMENT specifies). Checked during parsing, before any matching. `quantity`: integer. Extended string fields: non-empty. `id`: non-empty and unique per file.
 - Signs: `amount` may be negative. `quantity` must be > 0, `price_per_share` >= 0, `fx_rate` > 0.
-- `timestamp`: `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, a real calendar date. `--as-of`: exactly the ASSIGNMENT format `YYYY-MM-DDTHH:MM:SS[.sss]Z` (fraction absent or exactly 3 digits); anything else is a usage error, exit 2.
+- `timestamp`: `YYYY-MM-DDTHH:MM:SS[.fraction]Z` with 1 to 9 fraction digits (nanoseconds), a real calendar date. This is the strict extended-format subset of ISO 8601 UTC that every example uses; offsets such as `+00:00`, basic format, comma decimals, and reduced precision are rejected. ISO 8601 sets no digit limit; the cap keeps every accepted instant exact. `--as-of`: exactly the ASSIGNMENT format `YYYY-MM-DDTHH:MM:SS[.sss]Z` (fraction absent or exactly 3 digits); anything else is a usage error, exit 2.
 - `memo` is optional and ignored by exact and rule-based matching; only the fuzzy tier uses it (D10).
 - Unknown columns are ignored.
 - `manual.csv`: header `ours_id,theirs_id`; header-only or completely empty (0 bytes) means no pins.

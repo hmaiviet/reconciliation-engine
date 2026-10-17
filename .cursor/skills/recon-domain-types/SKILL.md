@@ -44,7 +44,7 @@ A file is either entirely simple or entirely extended: when the extended columns
 
 ## Timestamps
 
-- Accepted form is `YYYY-MM-DDTHH:MM:SS[.fraction]Z`. Validate it with a strict regex before parsing, and reject offsets and missing `Z` unless the contract says otherwise.
+- Accepted form is `YYYY-MM-DDTHH:MM:SS[.fraction]Z` with at most 9 fraction digits (contract D7). Validate it with a strict regex before parsing, and reject offsets and missing `Z` unless the contract says otherwise.
 - `Date` only keeps milliseconds. If the contract allows more precision, represent an instant as integer epoch seconds plus a fractional `Decimal`, or as a bigint of nanoseconds. Never silently truncate.
 - Compute time differences as Decimal seconds (`ours - theirs`). Compare against `as_of` with the same representation.
 

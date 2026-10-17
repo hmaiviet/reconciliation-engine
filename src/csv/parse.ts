@@ -81,7 +81,7 @@ export function parseTransactions(text: string, file: string): Txn[] {
 
     const amount = decimal('amount');
     const timestamp = parseTimestamp(values.timestamp ?? '');
-    if (!timestamp) fail('timestamp', `'${values.timestamp}' is not YYYY-MM-DDTHH:MM:SS[.fraction]Z`);
+    if (!timestamp) fail('timestamp', `'${values.timestamp}' is not YYYY-MM-DDTHH:MM:SS[.fraction]Z with at most 9 fractional digits`);
 
     let ext: Txn['extended'];
     if (extended) {

@@ -77,7 +77,7 @@ Parse decimal values directly from strings. Do not pass money or FX values throu
 5. Apply all rule-based matches among remaining records.
 6. Classify remaining eligible records as unmatched.
 
-Complete each tier globally before moving to the next. Consume each record at most once and use an explicit candidate-selection policy. Ignore memos in automatic matching for this release.
+Complete each tier globally before moving to the next. Consume each record at most once and use an explicit candidate-selection policy. Exact and rule-based matching ignore memos; the fuzzy tier added later (contract D10) runs after rule-based and uses them.
 
 ### 1.6 Implement report generation
 
@@ -294,12 +294,11 @@ All implemented; the README lists them with the additional `typecheck` and `chec
 
 - Fuzzy matching was an optional bonus after the four milestones; it is implemented per contract D10.
 - Deployment, cloud services, database persistence, and hosted CI are not planned.
-- Matching thresholds, extended-field semantics, ambiguity handling, and output precision remain decisions to resolve together before dependent implementation.
 - The full plan may exceed the assignment's one-day budget; the tested CLI is the first deliverable.
 
 ## References
 
 - [Assignment](ASSIGNMENT.md)
-- [Worked examples](examples/)
+- [Worked examples](../examples/)
 - [Playwright web-server configuration](https://playwright.dev/docs/test-webserver)
 - [Playwright trace viewer](https://playwright.dev/docs/trace-viewer)

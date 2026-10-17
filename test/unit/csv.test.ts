@@ -100,7 +100,7 @@ describe('CSV transactions: structural errors', () => {
 describe('CSV transactions: field validation (D7)', () => {
   it('csv: every invalid simple field is reported with file, start row, and field', () => {
     const f = 'invalid_simple.csv';
-    const ts = 'is not YYYY-MM-DDTHH:MM:SS[.fraction]Z';
+    const ts = 'is not YYYY-MM-DDTHH:MM:SS[.fraction]Z with at most 9 fractional digits';
     const places = 'is not a decimal with exactly 2 decimal places';
     expect(errorsOf(() => txns(f))).toEqual([
       { file: f, row: 2, field: 'amount', message: `'100' ${places}` },
