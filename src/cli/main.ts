@@ -2,10 +2,10 @@
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { parseManual, parseTransactions } from '../csv/parse.js';
-import { DEFAULT_TOLERANCES, reconcile } from '../domain/reconcile.js';
-import { Decimal, ValidationError, formatInputError, parseTimestamp, type InputError } from '../domain/types.js';
-import { buildReport, serializeReport, type Report } from '../report/report.js';
+import { DEFAULT_TOLERANCES } from '../domain/reconcile.js';
+import { ValidationError, formatInputError, type InputError } from '../domain/types.js';
+import { parseAsOf, parseTolerance, runReconciliation, type CsvInput } from '../pipeline.js';
+import { serializeReport, type Report } from '../report/report.js';
 
 const USAGE = `Usage: recon run --ours OURS.csv --theirs THEIRS.csv --manual MANUAL.csv \\
                 --as-of YYYY-MM-DDTHH:MM:SS[.sss]Z --output REPORT.json
@@ -18,8 +18,6 @@ Options:
 Exit codes: 0 report written, 1 invalid input, 2 usage error.`;
 
 const REQUIRED = ['ours', 'theirs', 'manual', 'as-of', 'output'] as const;
-const AS_OF = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d{3}))?Z$/;
-const NON_NEGATIVE = /^\d+(\.\d+)?$/;
 
 const EXIT_OK = 0;
 const EXIT_INPUT = 1;
@@ -68,49 +66,33 @@ async function main(argv: string[]): Promise<number> {
   if (missing.length) return usageError(`missing ${missing.map((f) => `--${f}`).join(', ')}`);
   const { ours: oursPath, theirs: theirsPath, manual: manualPath, output } = opts as Record<(typeof REQUIRED)[number], string>;
 
-  const asOfText = opts['as-of'] ?? '';
-  const asOfMatch = AS_OF.exec(asOfText);
-  const asOf = asOfMatch && parseTimestamp(asOfText);
-  if (!asOfMatch || !asOf) return usageError(`--as-of '${asOfText}' is not a valid YYYY-MM-DDTHH:MM:SS[.sss]Z timestamp`);
-  const asOfNormalized = `${asOfText.slice(0, 19)}.${asOfMatch[1] ?? '000'}Z`;
-
-  const tolerances = { ...DEFAULT_TOLERANCES };
-  for (const [flag, key] of [['amount-tolerance', 'amount'], ['time-tolerance-seconds', 'seconds']] as const) {
-    const v = opts[flag];
-    if (v === undefined) continue;
-    if (!NON_NEGATIVE.test(v)) return usageError(`--${flag} '${v}' must be a non-negative decimal`);
-    tolerances[key] = new Decimal(v);
+  const asOf = opts['as-of'] ?? '';
+  if (!parseAsOf(asOf)) return usageError(`--as-of '${asOf}' is not a valid YYYY-MM-DDTHH:MM:SS[.sss]Z timestamp`);
+  const amount = opts['amount-tolerance'];
+  const seconds = opts['time-tolerance-seconds'];
+  for (const [flag, v] of [['amount-tolerance', amount], ['time-tolerance-seconds', seconds]] as const) {
+    if (v !== undefined && !parseTolerance(v)) return usageError(`--${flag} '${v}' must be a non-negative decimal`);
   }
 
-  const read = async (path: string) => readFile(resolve(process.cwd(), path), 'utf8');
-  let texts: string[];
+  const read = async (path: string) => ({ name: path, text: await readFile(resolve(process.cwd(), path), 'utf8') });
+  let inputs: CsvInput[];
   try {
-    texts = await Promise.all([oursPath, theirsPath, manualPath].map(read));
+    inputs = await Promise.all([oursPath, theirsPath, manualPath].map(read));
   } catch (e) {
     return inputErrors([{ message: `cannot read input: ${(e as Error).message}` }]);
   }
-  const [oursText = '', theirsText = '', manualText = ''] = texts;
+  const [ours, theirs, manual] = inputs as [CsvInput, CsvInput, CsvInput];
 
-  const errors: InputError[] = [];
-  const attempt = <T>(fn: () => T): T | undefined => {
-    try {
-      return fn();
-    } catch (e) {
-      if (!(e instanceof ValidationError)) throw e;
-      errors.push(...e.errors);
-      return undefined;
-    }
-  };
-  const ours = attempt(() => parseTransactions(oursText, oursPath));
-  const theirs = attempt(() => parseTransactions(theirsText, theirsPath));
-  const manual = attempt(() => parseManual(manualText, manualPath));
-  if (!ours || !theirs || !manual) return inputErrors(errors);
+  let out;
+  try {
+    out = runReconciliation({ ours, theirs, manual, asOf, tolerances: { amount, seconds } });
+  } catch (e) {
+    if (e instanceof ValidationError) return inputErrors(e.errors);
+    throw e;
+  }
+  for (const w of out.warnings) process.stderr.write(`warning: ${formatInputError(w)}\n`);
 
-  const result = attempt(() => reconcile({ ours, theirs, manual, asOf, tolerances }));
-  if (!result) return inputErrors(errors.map((e) => ({ file: manualPath, ...e })));
-  for (const w of result.warnings) process.stderr.write(`warning: ${formatInputError({ file: manualPath, ...w })}\n`);
-
-  const report = buildReport(result, asOfNormalized);
+  const { report } = out;
   const outPath = resolve(process.cwd(), output);
   try {
     await writeAtomically(outPath, serializeReport(report));

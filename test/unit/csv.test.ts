@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { formatManual } from '../../src/csv/format.js';
 import { parseManual, parseTransactions } from '../../src/csv/parse.js';
 import { ValidationError, parseTimestamp, type Txn } from '../../src/domain/types.js';
 
@@ -153,6 +154,20 @@ describe('CSV manual pins', () => {
     expect(errorsOf(() => parseManual(fixture('manual_missing_column.csv'), 'manual.csv'))).toEqual([
       { file: 'manual.csv', row: 1, message: "missing column 'theirs_id'" },
     ]);
+  });
+
+  it('manual: formatManual output parses back to the same pins, including commas and quotes in ids', () => {
+    const pins = [
+      { ours_id: 'o-1', theirs_id: 't-1' },
+      { ours_id: 'o,2', theirs_id: 't "2"' },
+    ];
+    const text = formatManual(pins);
+    expect(text).toBe('ours_id,theirs_id\no-1,t-1\n"o,2","t ""2"""\n');
+    expect(parseManual(text, 'manual.csv').map((p) => ({ ours_id: p.oursId, theirs_id: p.theirsId }))).toEqual(pins);
+  });
+
+  it('manual: formatManual with no pins writes a header-only file', () => {
+    expect(formatManual([])).toBe('ours_id,theirs_id\n');
   });
 
   it('manual: empty ids are errors', () => {

@@ -101,3 +101,35 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 | `fx_rate` `0.000000` or `-1.000000` | error, must be positive |
 | 0-byte `manual.csv` | no pins |
 | 0-byte `ours.csv` | error, file is empty |
+
+## D8: API contract
+**Status:** agreed
+**Decision:**
+- Local development only: Fastify on `127.0.0.1:3001`, request body limit 10 MiB. The GUI dev server uses `127.0.0.1:5173`, overridable with `WEB_PORT`.
+- `POST /reconcile` with JSON `{ ours, theirs, manual, as_of, tolerances?: { amount?, seconds? } }`. The first three are CSV file contents as strings; errors name them `ours.csv`, `theirs.csv`, `manual.csv`. Unknown properties and non-string values are rejected (no coercion).
+- `200`: `{ report, warnings, tolerances, records: { ours, theirs }, pins }`. `report` is exactly what the CLI writes for the same inputs; `tolerances` echoes the values used; `records` lists every eligible record (D6 echo plus `memo` when the file has that column, sorted by id; `report` itself still omits `memo`); `pins` lists the manual pins without identical duplicates.
+- `400`: `{ errors: [{ file?, row?, field?, message }] }` with every input problem, the same messages the CLI prints for exit 1 and 2. `413` for an oversized body. Anything unexpected is `500` with `internal error` and no details.
+**Why:** One engine path (`src/pipeline.ts`) for CLI and API keeps their reports identical; `records` and `pins` let the GUI pin any eligible record without re-parsing CSV in the browser.
+**Examples:**
+| request | response |
+| --- | --- |
+| example 2 inputs, `as_of` `2026-04-01T23:59:59.999Z` | 200, `report` equals `expected_report.json` |
+| `as_of` `2026-04-01` | 400, `as_of: '2026-04-01' is not a valid YYYY-MM-DDTHH:MM:SS[.sss]Z timestamp` |
+| `tolerances: { percent: "1" }` | 400, field `tolerances.percent` |
+| `ours` row with `amount` `100` | 400, `ours.csv:2: amount: ...` |
+
+## D9: GUI behavior
+**Status:** agreed
+**Decision:**
+- Inputs: ours, theirs, optional manual CSV; cutoff as a text field labelled UTC, empty by default and validated by the API (D7); amount and time tolerances default to `0.01` and `1`.
+- Record tables and match details show every echoed field plus `memo`, to help judge a pin.
+- Any eligible record, matched or unmatched, can be pinned. A record that already has a pin cannot be selected, so the GUI never creates a D4 conflict. Pins can be removed; changes apply on the next run.
+- An uploaded `manual.csv` is used for the next run only; after a successful run its pins become the editable pin list and the file input clears. Adding pins is disabled while an uploaded file is pending.
+- Exports: `report.json` is the last run's report, byte-identical to the CLI's; `manual.csv` is the current pin list (header `ours_id,theirs_id`, CSV quoting when needed), so rerunning the CLI with it reproduces the GUI's next report.
+- State lives in the browser tab only; nothing is stored on disk or the server.
+**Examples:**
+| action | result |
+| --- | --- |
+| example 2, pin o-003 to t-103, run | 2 manual matches, 0 unmatched |
+| download `manual.csv`, run the CLI with it | report identical to the GUI's `report.json` |
+| remove that pin, run | back to example 2's expected report |

@@ -14,9 +14,11 @@ export interface Report {
     unmatched_theirs: number;
   };
   matches: { kind: MatchKind; ours_id: string; theirs_id: string; amount_diff: string; timestamp_diff_seconds: string }[];
-  unmatched_ours: Record<string, string | number>[];
-  unmatched_theirs: Record<string, string | number>[];
+  unmatched_ours: Echo[];
+  unmatched_theirs: Echo[];
 }
+
+export type Echo = Record<string, string | number>;
 
 /** `asOf` must already be in normalized `...:SS.sssZ` form (D5). */
 export function buildReport(result: ReconResult, asOf: string): Report {
@@ -57,21 +59,24 @@ function fixed(value: Decimal, places: number): string {
   return (rounded.isZero() ? rounded.abs() : rounded).toFixed(places);
 }
 
-// D6: original strings, no memo, quantity as a number.
-function echoAll(txns: Txn[]): Record<string, string | number>[] {
+/** Records sorted by id, each echoed per D6; `withMemo` adds `memo` last when the file has that column (GUI only, D8). */
+export function echoAll(txns: Txn[], withMemo = false): Echo[] {
   return [...txns]
     .sort((a, b) => compareIds(a.id, b.id))
-    .map((t) => {
-      const r = t.raw;
-      const base = { id: t.id, amount: r.amount ?? '', timestamp: r.timestamp ?? '' };
-      if (!t.extended) return base;
-      return {
-        ...base,
-        currency: t.extended.currency,
-        quantity: t.extended.quantity,
-        price_per_share: r.price_per_share ?? '',
-        fx_rate: r.fx_rate ?? '',
-        party_email: t.extended.partyEmail,
-      };
-    });
+    .map((t) => (withMemo && t.raw.memo !== undefined ? { ...echo(t), memo: t.raw.memo } : echo(t)));
+}
+
+// D6: original strings, no memo, quantity as a number.
+function echo(t: Txn): Echo {
+  const r = t.raw;
+  const base = { id: t.id, amount: r.amount ?? '', timestamp: r.timestamp ?? '' };
+  if (!t.extended) return base;
+  return {
+    ...base,
+    currency: t.extended.currency,
+    quantity: t.extended.quantity,
+    price_per_share: r.price_per_share ?? '',
+    fx_rate: r.fx_rate ?? '',
+    party_email: t.extended.partyEmail,
+  };
 }
