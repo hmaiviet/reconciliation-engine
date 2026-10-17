@@ -1,0 +1,327 @@
+import { describe, expect, it } from 'vitest';
+import { ValidationError } from '../../src/domain/types.js';
+import { ext, pairs, run, txn, unmatched } from '../helpers/builders.js';
+
+describe('manual (D4)', () => {
+  it('manual: pin wins over an exact automatic candidate', () => {
+    const r = run({
+      ours: [txn('o-1')],
+      theirs: [txn('t-1'), txn('t-2', { amount: '999.99', timestamp: '2026-01-01T14:00:00.000Z' })],
+      manual: [['o-1', 't-2']],
+    });
+    expect(pairs(r)).toEqual([['manual', 'o-1', 't-2']]);
+    expect(unmatched(r)).toEqual({ ours: [], theirs: ['t-1'] });
+  });
+
+  it('manual: pin wins even when extended fields disagree (example 3 o-004/t-104)', () => {
+    const r = run({
+      ours: [ext('o-1', { currency: 'EUR', quantity: '200', price_per_share: '5.00' })],
+      theirs: [ext('t-1', { currency: 'USD', quantity: '250', price_per_share: '4.00' })],
+      manual: [['o-1', 't-1']],
+    });
+    expect(pairs(r)).toEqual([['manual', 'o-1', 't-1']]);
+  });
+
+  it('manual: identical repeated pins collapse to one match', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1')], manual: [['o-1', 't-1'], ['o-1', 't-1']] });
+    expect(pairs(r)).toEqual([['manual', 'o-1', 't-1']]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('manual: ours pinned to two partners fails naming both rows', () => {
+    const s = { ours: [txn('o-1')], theirs: [txn('t-1'), txn('t-2')], manual: [['o-1', 't-1'], ['o-1', 't-2']] as [string, string][] };
+    expect(() => run(s)).toThrow(ValidationError);
+    expect(errorsOf(() => run(s))).toEqual([{ row: 3, message: "ours_id 'o-1' is also pinned to 't-1' on row 2" }]);
+  });
+
+  it('manual: theirs pinned to two partners fails naming both rows', () => {
+    const s = { ours: [txn('o-1'), txn('o-2')], theirs: [txn('t-1')], manual: [['o-1', 't-1'], ['o-2', 't-1']] as [string, string][] };
+    expect(errorsOf(() => run(s))).toEqual([{ row: 3, message: "theirs_id 't-1' is also pinned to 'o-1' on row 2" }]);
+  });
+
+  it('manual: chained conflicts report every conflicting row', () => {
+    const s = {
+      ours: [txn('o-1'), txn('o-2')],
+      theirs: [txn('t-1'), txn('t-2')],
+      manual: [['o-1', 't-1'], ['o-2', 't-1'], ['o-2', 't-2']] as [string, string][],
+    };
+    expect(errorsOf(() => run(s))).toEqual([
+      { row: 3, message: "theirs_id 't-1' is also pinned to 'o-1' on row 2" },
+      { row: 4, message: "ours_id 'o-2' is also pinned to 't-1' on row 3" },
+    ]);
+  });
+
+  it('manual: pin to a missing theirs id is skipped with a warning; ours matches automatically', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1')], manual: [['o-1', 't-404']] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1']]);
+    expect(r.warnings).toEqual([{ row: 2, message: "theirs_id 't-404' not found; pin skipped" }]);
+  });
+
+  it('manual: pin to a missing ours id is skipped with a warning', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1')], manual: [['o-404', 't-1']] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1']]);
+    expect(r.warnings).toEqual([{ row: 2, message: "ours_id 'o-404' not found; pin skipped" }]);
+  });
+
+  it('manual: a skipped pin does not conflict with a valid pin on the same id', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1')], manual: [['o-1', 't-404'], ['o-1', 't-1']] });
+    expect(pairs(r)).toEqual([['manual', 'o-1', 't-1']]);
+    expect(r.warnings).toEqual([{ row: 2, message: "theirs_id 't-404' not found; pin skipped" }]);
+  });
+
+  it('manual: pin to a record after as_of is skipped; its partner competes automatically', () => {
+    const r = run({
+      ours: [txn('o-1')],
+      theirs: [txn('t-1', { timestamp: '2026-01-02T10:00:00.000Z' }), txn('t-2')],
+      manual: [['o-1', 't-1']],
+    });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-2']]);
+    expect(r.warnings).toEqual([{ row: 2, message: "theirs 't-1' is after as_of; pin skipped" }]);
+  });
+
+  it('manual: a pin to an after-cutoff record does not conflict with a valid pin', () => {
+    const r = run({
+      ours: [txn('o-1', { timestamp: '2026-01-02T10:00:00.000Z' }), txn('o-2')],
+      theirs: [txn('t-1')],
+      manual: [['o-1', 't-1'], ['o-2', 't-1']],
+    });
+    expect(pairs(r)).toEqual([['manual', 'o-2', 't-1']]);
+    expect(r.warnings).toEqual([{ row: 2, message: "ours 'o-1' is after as_of; pin skipped" }]);
+  });
+});
+
+describe('exact', () => {
+  it('exact: equal amount and timestamp match', () => {
+    expect(pairs(run({ ours: [txn('o-1')], theirs: [txn('t-1')] }))).toEqual([['exact', 'o-1', 't-1']]);
+  });
+
+  it('exact: differing memos are ignored', () => {
+    const r = run({ ours: [txn('o-1', { memo: 'coffee' })], theirs: [txn('t-1', { memo: 'settlement' })] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1']]);
+  });
+
+  it('exact: equal instants written with and without milliseconds match', () => {
+    const r = run({ ours: [txn('o-1', { timestamp: '2026-01-01T10:00:00Z' })], theirs: [txn('t-1')] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1']]);
+  });
+
+  it('exact: duplicate candidates pair by id order regardless of input order (D3)', () => {
+    const expected = [['exact', 'o-1', 't-1'], ['exact', 'o-2', 't-2']];
+    expect(pairs(run({ ours: [txn('o-1'), txn('o-2')], theirs: [txn('t-1'), txn('t-2')] }))).toEqual(expected);
+    expect(pairs(run({ ours: [txn('o-2'), txn('o-1')], theirs: [txn('t-2'), txn('t-1')] }))).toEqual(expected);
+  });
+
+  it('exact: extended records with all five fields equal match (D2)', () => {
+    expect(pairs(run({ ours: [ext('o-1')], theirs: [ext('t-1')] }))).toEqual([['exact', 'o-1', 't-1']]);
+  });
+
+  it('exact: extended records differing only in fx_rate fall to rule_based (D2)', () => {
+    const r = run({ ours: [ext('o-1')], theirs: [ext('t-1', { fx_rate: '1.100000' })] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('exact: extended records differing only in price_per_share fall to rule_based (D2)', () => {
+    const r = run({ ours: [ext('o-1')], theirs: [ext('t-1', { price_per_share: '100.01' })] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('exact: different currency and party_email stay unmatched (D2, example 3 o-003/t-103)', () => {
+    const r = run({ ours: [ext('o-1')], theirs: [ext('t-1', { currency: 'EUR', party_email: 'c@x.com' })] });
+    expect(pairs(r)).toEqual([]);
+    expect(unmatched(r)).toEqual({ ours: ['o-1'], theirs: ['t-1'] });
+  });
+
+  it('exact: a simple and an extended record match on amount and timestamp (D2 mixed shapes)', () => {
+    expect(pairs(run({ ours: [txn('o-1')], theirs: [ext('t-1')] }))).toEqual([['exact', 'o-1', 't-1']]);
+  });
+
+  it('tiers: exact pairs are taken before any rule-based pair', () => {
+    // A single ranking by diffs then ids would pick o-1/t-1 (rule-based, fx drift) before o-1/t-2 (exact).
+    const r = run({ ours: [ext('o-1')], theirs: [ext('t-1', { fx_rate: '1.100000' }), ext('t-2')] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-2']]);
+    expect(unmatched(r)).toEqual({ ours: [], theirs: ['t-1'] });
+  });
+});
+
+describe('rule-based (D1)', () => {
+  const at = (s: string) => `2026-01-01T10:00:${s}Z`;
+
+  it('rule-based: amount diff exactly at 0.01 matches', () => {
+    expect(pairs(run({ ours: [txn('o-1')], theirs: [txn('t-1', { amount: '100.01' })] }))).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: amount diff 0.01 in the other direction matches', () => {
+    expect(pairs(run({ ours: [txn('o-1')], theirs: [txn('t-1', { amount: '99.99' })] }))).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: amount diff just above threshold (0.02) stays unmatched', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1', { amount: '100.02' })] });
+    expect(pairs(r)).toEqual([]);
+    expect(unmatched(r)).toEqual({ ours: ['o-1'], theirs: ['t-1'] });
+  });
+
+  it('rule-based: timestamp diff just below threshold (0.999 s) matches', () => {
+    expect(pairs(run({ ours: [txn('o-1', { timestamp: at('00.999') })], theirs: [txn('t-1')] }))).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: timestamp diff exactly at threshold (1.000 s) matches', () => {
+    expect(pairs(run({ ours: [txn('o-1', { timestamp: at('01.000') })], theirs: [txn('t-1')] }))).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: timestamp diff just above threshold (1.001 s) stays unmatched', () => {
+    expect(pairs(run({ ours: [txn('o-1', { timestamp: at('01.001') })], theirs: [txn('t-1')] }))).toEqual([]);
+  });
+
+  it('rule-based: timestamp diff 1.0000001 s stays unmatched at full precision (D5)', () => {
+    expect(pairs(run({ ours: [txn('o-1', { timestamp: at('01.0000001') })], theirs: [txn('t-1')] }))).toEqual([]);
+  });
+
+  it('rule-based: amount and timestamp both at thresholds match', () => {
+    const r = run({ ours: [txn('o-1', { timestamp: at('01.000') })], theirs: [txn('t-1', { amount: '100.01' })] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: custom tolerances are honored', () => {
+    const s = { ours: [txn('o-1', { timestamp: at('02.000') })], theirs: [txn('t-1', { amount: '100.02' })] };
+    expect(pairs(run(s))).toEqual([]);
+    expect(pairs(run({ ...s, tolerances: { amount: '0.02', seconds: '2' } }))).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: smaller amount diff wins over smaller timestamp diff (D3)', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-1', { amount: '100.01' }), txn('t-2', { timestamp: at('00.400') })] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-2']]);
+  });
+
+  it('rule-based: equal amount diff, smaller timestamp diff wins (D3)', () => {
+    const r = run({
+      ours: [txn('o-1')],
+      theirs: [txn('t-1', { amount: '100.01', timestamp: at('00.900') }), txn('t-2', { amount: '100.01', timestamp: at('00.100') })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-2']]);
+  });
+
+  it('rule-based: timestamp diff ranks by magnitude, not sign (D3)', () => {
+    const r = run({
+      ours: [txn('o-1', { timestamp: at('00.500') })],
+      theirs: [txn('t-1', { timestamp: at('00.900') }), txn('t-2', { timestamp: at('00.000') })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: full tie goes to the lower theirs_id (D3)', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [txn('t-2', { amount: '100.01' }), txn('t-1', { amount: '100.01' })] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+    expect(unmatched(r)).toEqual({ ours: [], theirs: ['t-2'] });
+  });
+
+  it('rule-based: two ours competing for one theirs, the closer one wins (D3)', () => {
+    const r = run({ ours: [txn('o-1', { amount: '99.99' }), txn('o-2', { amount: '100.00', timestamp: at('00.500') })], theirs: [txn('t-1')] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-2', 't-1']]);
+    expect(unmatched(r)).toEqual({ ours: ['o-1'], theirs: [] });
+  });
+
+  it('rule-based: full tie between ours goes to the lower ours_id (D3)', () => {
+    const r = run({ ours: [txn('o-2', { amount: '100.01' }), txn('o-1', { amount: '100.01' })], theirs: [txn('t-1')] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it('rule-based: greedy closest-first does not maximize the match count (D3, documented limitation)', () => {
+    // o-1 takes t-1 (diff 0.00); o-2 could only have used t-1, and t-2 is only in range of o-1.
+    const r = run({
+      ours: [txn('o-1'), txn('o-2', { amount: '99.99' })],
+      theirs: [txn('t-1', { timestamp: at('00.500') }), txn('t-2', { amount: '100.01', timestamp: at('00.500') })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+    expect(unmatched(r)).toEqual({ ours: ['o-2'], theirs: ['t-2'] });
+  });
+
+  it('rule-based: extended records match when price and fx drift (D2, example 3 o-002/t-102)', () => {
+    const r = run({
+      ours: [ext('o-1', { amount: '10000.00', quantity: '1000', price_per_share: '10.00', currency: 'EUR' })],
+      theirs: [ext('t-1', { amount: '10000.01', timestamp: at('00.500'), quantity: '1000', price_per_share: '10.00', currency: 'EUR', fx_rate: '1.000001' })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+
+  it.each([
+    ['currency', { currency: 'EUR' }],
+    ['party_email', { party_email: 'b@x.com' }],
+    ['party_email case', { party_email: 'A@x.com' }],
+    ['quantity', { quantity: '2' }],
+  ])('rule-based: differing %s stays unmatched (D2)', (_, fields) => {
+    expect(pairs(run({ ours: [ext('o-1')], theirs: [ext('t-1', { amount: '100.01', ...fields })] }))).toEqual([]);
+  });
+
+  it('rule-based: a simple and an extended record never match rule-based (D2 mixed shapes)', () => {
+    const r = run({ ours: [txn('o-1')], theirs: [ext('t-1', { amount: '100.01' })] });
+    expect(pairs(r)).toEqual([]);
+    expect(unmatched(r)).toEqual({ ours: ['o-1'], theirs: ['t-1'] });
+  });
+});
+
+describe('time / cutoff', () => {
+  const asOf = '2026-01-01T12:00:00.000Z';
+
+  it('cutoff: records before and exactly at as_of are eligible', () => {
+    const r = run({
+      asOf,
+      ours: [txn('o-1'), txn('o-2', { timestamp: asOf })],
+      theirs: [txn('t-1'), txn('t-2', { timestamp: asOf })],
+    });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1'], ['exact', 'o-2', 't-2']]);
+  });
+
+  it('cutoff: records 1 ms after as_of are excluded on both sides', () => {
+    const late = '2026-01-01T12:00:00.001Z';
+    const r = run({ asOf, ours: [txn('o-1', { timestamp: late })], theirs: [txn('t-1', { timestamp: late })] });
+    expect(pairs(r)).toEqual([]);
+    expect(unmatched(r)).toEqual({ ours: [], theirs: [] });
+  });
+
+  it('cutoff: a record 0.1 µs after as_of is excluded (full precision)', () => {
+    const r = run({ asOf, ours: [txn('o-1', { timestamp: '2026-01-01T12:00:00.0000001Z' })], theirs: [] });
+    expect(unmatched(r)).toEqual({ ours: [], theirs: [] });
+  });
+
+  it('cutoff: an excluded record cannot steal an eligible partner', () => {
+    // o-1 would win on both time diff and id if it were eligible.
+    const r = run({
+      asOf,
+      ours: [txn('o-1', { timestamp: '2026-01-01T12:00:00.050Z' }), txn('o-2', { timestamp: '2026-01-01T11:59:59.900Z' })],
+      theirs: [txn('t-1', { timestamp: asOf })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-2', 't-1']]);
+  });
+
+  it('precision: timestamps differing below 1 ms are not exact', () => {
+    const r = run({ ours: [txn('o-1', { timestamp: '2026-01-01T10:00:00.0001Z' })], theirs: [txn('t-1')] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+  });
+});
+
+describe('invariants', () => {
+  it('invariants: no record matched twice and every eligible record appears once in a mixed scenario', () => {
+    // run() asserts the invariants; this scenario exercises every tier at once.
+    const r = run({
+      ours: [txn('o-1'), txn('o-2', { amount: '50.00' }), txn('o-3', { amount: '20.00' }), txn('o-4', { amount: '7.00' }), txn('o-5', { timestamp: '2026-01-02T00:00:00.000Z' })],
+      theirs: [txn('t-1'), txn('t-2', { amount: '50.01' }), txn('t-3', { amount: '999.00' }), txn('t-4', { amount: '100.00' })],
+      manual: [['o-3', 't-3']],
+    });
+    expect(pairs(r)).toEqual([
+      ['manual', 'o-3', 't-3'],
+      ['exact', 'o-1', 't-1'],
+      ['rule_based', 'o-2', 't-2'],
+    ]);
+    expect(unmatched(r)).toEqual({ ours: ['o-4'], theirs: ['t-4'] });
+  });
+});
+
+function errorsOf(fn: () => unknown) {
+  try {
+    fn();
+  } catch (e) {
+    if (e instanceof ValidationError) return e.errors;
+    throw e;
+  }
+  throw new Error('expected a ValidationError');
+}

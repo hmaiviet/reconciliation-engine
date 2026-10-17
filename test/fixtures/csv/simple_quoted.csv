@@ -1,0 +1,6 @@
+id,amount,timestamp,memo
+o-1,100.00,2026-01-01T10:00:00.000Z,"coffee, large"
+o-2,-5.10,2026-01-01T11:00:00Z,"multi
+line memo"
+
+o-3,0.00,2026-01-01T12:00:00.123456789Z,

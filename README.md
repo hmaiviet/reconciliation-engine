@@ -37,8 +37,23 @@ Set `RECON_DEBUG=1` to print stack traces for unexpected errors.
 | Command | Purpose |
 | --- | --- |
 | `npm run build` | Compile TypeScript to `dist/` |
-| `npm run typecheck` | Type-check without emitting |
+| `npm run typecheck` | Type-check `src/` and `test/` without emitting |
+| `npm test` | Build, then run all unit and CLI integration tests once |
+| `npm run test:watch` | Re-run tests on change (integration tests use the last build) |
+| `npm run test:coverage` | Build, test, and print a coverage report |
 | `npm run check:examples` | Build, then run every scenario in `examples/` from a fresh temp directory and compare to `expected_report.json` (`scripts/check-scenarios.mjs`) |
+
+## Tests
+
+```text
+test/
+  unit/          engine, CSV parsing, timestamps, report formatting; pure, no processes
+  integration/   run the built dist/cli/main.js as a child process in temp directories
+  helpers/       transaction builders, invariant checks, CLI runner
+  fixtures/      CSV files and the non-fuzzy expectation for example 4
+```
+
+Run one area with `npx vitest run test/unit` or one test by name with `npx vitest run -t "rule-based"`. Test names cite the contract decision they cover, e.g. `(D1)`. Every engine test also checks the invariants: each eligible record appears exactly once, and nothing after `as_of` appears. Coverage for `src/cli` reads 0% because it only runs in child processes; the integration tests cover it.
 
 ## Architecture
 
@@ -63,16 +78,15 @@ Summarised from [`docs/matching-contract.md`](docs/matching-contract.md):
 
 - Rule-based: `|amount diff| <= 0.01` and `|timestamp diff| <= 1 s`, absolute and inclusive; both configurable per run.
 - Extended records: exact requires all five extended fields equal; rule-based requires `currency`, `party_email`, and `quantity` equal while `price_per_share` and `fx_rate` may drift. A simple record and an extended record can match exactly on amount and timestamp, but never rule-based.
-- Inputs are validated before matching: `amount` and `price_per_share` must have exactly 2 decimal places, `fx_rate` exactly 6.
-- Manual pins always win. Identical duplicates are de-duplicated; conflicting pins fail the run; pins to missing IDs or to records after `as_of` are skipped with a warning.
+- Inputs are validated before matching: `amount` and `price_per_share` must have exactly 2 decimal places, `fx_rate` exactly 6; `quantity` > 0, `price_per_share` >= 0, `fx_rate` > 0. A 0-byte `manual.csv` means no pins.
+- Manual pins always win. Identical duplicates are de-duplicated; pins to missing IDs or to records after `as_of` are skipped with a warning; remaining pins that pin one record to two partners fail the run.
 - Unmatched records echo their input fields except `memo` (as in the examples); `quantity` is a JSON number.
 - `as_of` is normalized to millisecond form in the report.
 
 ## Limitations
 
-- No fuzzy tier yet: `examples/example_4_fuzzy_memo` reports `o-003/t-103` as unmatched instead of fuzzy. This is expected until fuzzy matching is implemented (deferred by the plan).
-- Greedy selection does not maximize the number of matches when candidates compete.
-- No automated test suite yet; milestone 2 adds Vitest unit and CLI integration tests. Currently verified with `npm run check:examples` and ad hoc edge-case runs.
+- No fuzzy tier yet: `examples/example_4_fuzzy_memo` reports `o-003/t-103` as unmatched instead of fuzzy. This is expected until fuzzy matching is implemented (deferred by the plan); `test/fixtures/example_4_nonfuzzy_expected.json` records the current expectation.
+- Greedy selection does not maximize the number of matches when candidates compete (covered by a named test).
 
 ## AI assistance
 

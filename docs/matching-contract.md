@@ -1,6 +1,6 @@
 # Matching contract
 
-Agreed matching behavior. The engine, tests, and README follow this document. Each example row becomes a named test in milestone 2.
+Agreed matching behavior. The engine, tests, and README follow this document. Each example row has a named test that cites the decision ID; find them with `rg '\(D4' test/`.
 
 Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timestamp; all times are on the same day.
 
@@ -48,17 +48,19 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 **Decision:**
 - Pins are applied first and win regardless of amount, timestamp, or extended fields.
 - Identical repeated pins are de-duplicated.
-- Conflicting pins (one ID pinned to two different partners) fail the run with exit 1, naming the rows.
 - A pin whose ID does not exist, or whose record is after `as_of`, is skipped with a stderr warning; its partner competes in automatic tiers normally.
+- Conflicts are checked after skipping: if an existing, eligible record is pinned to two different partners, the run fails with exit 1, naming the rows.
 **Why:** ASSIGNMENT: manual "always wins". Conflicts have no correct answer, so the operator must fix them; stale pins should not block a daily run.
 **Examples:**
 | manual.csv | expected |
 | --- | --- |
 | `o-2,t-2` where o-2/t-2 differ by 949.99 and 4 h | manual, amount_diff `-949.99` |
 | `o-1,t-1` twice | one manual match |
-| `o-1,t-1` and `o-1,t-2` | exit 1, conflict error |
+| `o-1,t-1` and `o-1,t-2` | exit 1, conflict error (o-1 pinned twice) |
+| `o-1,t-1` and `o-2,t-1` | exit 1, conflict error (t-1 pinned twice) |
 | `o-1,t-9` (t-9 missing), o-1 exactly equals t-1 | warning; exact o-1/t-1 |
 | `o-1,t-1` with t-1 after `as_of` | warning; o-1 competes automatically, t-1 absent from report |
+| `o-1,t-404` (missing) and `o-1,t-1` | warning for the first row; manual o-1/t-1, no conflict |
 
 ## D5: Precision and rounding
 **Status:** agreed
@@ -80,10 +82,11 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 **Decision:**
 - Transaction files need a header with `id`, `amount`, `timestamp`; `memo` is optional. Extended columns are all-or-nothing. Unknown columns are ignored. A header-only file has zero records; an empty file is an error.
 - `amount` and `price_per_share`: exactly 2 decimal places; `fx_rate`: exactly 6 (`-?digits.digits`, as ASSIGNMENT specifies). Checked during parsing, before any matching. `quantity`: integer. Extended string fields: non-empty. `id`: non-empty and unique per file.
+- Signs: `amount` may be negative. `quantity` must be > 0, `price_per_share` >= 0, `fx_rate` > 0.
 - `timestamp`: `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, a real calendar date. `--as-of`: exactly the ASSIGNMENT format `YYYY-MM-DDTHH:MM:SS[.sss]Z` (fraction absent or exactly 3 digits); anything else is a usage error, exit 2.
 - `memo` is optional and ignored by exact and rule-based matching; it is reserved for the fuzzy tier.
 - Unknown columns are ignored.
-- `manual.csv`: header `ours_id,theirs_id`; header-only means no pins.
+- `manual.csv`: header `ours_id,theirs_id`; header-only or completely empty (0 bytes) means no pins.
 - All errors are collected and reported as `file:row: field: message`, exit 1. `row` is the physical line where the record starts, even when it spans several lines.
 **Examples:**
 | field value | result |
@@ -92,3 +95,9 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 | `amount` `100`, `100.0`, `100.000` | `ours.csv:2: amount: '100' is not a decimal with exactly 2 decimal places` |
 | `fx_rate` `1.000000` | valid |
 | `fx_rate` `1.0` | error, exactly 6 decimal places required |
+| `quantity` `0` or `-5` | error, must be positive |
+| `price_per_share` `0.00` | valid |
+| `price_per_share` `-1.00` | error, must not be negative |
+| `fx_rate` `0.000000` or `-1.000000` | error, must be positive |
+| 0-byte `manual.csv` | no pins |
+| 0-byte `ours.csv` | error, file is empty |

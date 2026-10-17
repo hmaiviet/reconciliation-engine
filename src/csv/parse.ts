@@ -14,7 +14,7 @@ interface Row {
 }
 
 /** Parses CSV text into header-keyed rows; throws ValidationError for structural problems. */
-function readRows(text: string, file: string, required: string[]): { header: string[]; rows: Row[] } {
+function readRows(text: string, file: string, required: string[], allowEmpty = false): { header: string[]; rows: Row[] } {
   let records: { record: string[]; info: { lines: number; empty_lines: number } }[];
   try {
     records = parse(text, { bom: true, info: true, skip_empty_lines: true, trim: true }) as unknown as typeof records;
@@ -25,6 +25,7 @@ function readRows(text: string, file: string, required: string[]): { header: str
     throw e;
   }
   const [first, ...rest] = records;
+  if (!first && allowEmpty) return { header: [], rows: [] };
   if (!first) throw new ValidationError([{ file, message: 'file is empty; expected a header row' }]);
 
   const header = first.record;
@@ -85,10 +86,14 @@ export function parseTransactions(text: string, file: string): Txn[] {
     let ext: Txn['extended'];
     if (extended) {
       const q = values.quantity ?? '';
+      // D7: quantity > 0, price_per_share >= 0, fx_rate > 0.
       const quantity = INTEGER.test(q) ? Number(q) : NaN;
       if (!Number.isSafeInteger(quantity)) fail('quantity', `'${q}' is not an integer`);
+      else if (quantity <= 0) fail('quantity', `'${q}' must be positive`);
       const pricePerShare = decimal('price_per_share');
+      if (pricePerShare?.lt(0)) fail('price_per_share', `'${values.price_per_share}' must not be negative`);
       const fxRate = decimal('fx_rate');
+      if (fxRate?.lte(0)) fail('fx_rate', `'${values.fx_rate}' must be positive`);
       const currency = text('currency');
       const partyEmail = text('party_email');
       if (pricePerShare && fxRate) ext = { currency, quantity, pricePerShare, fxRate, partyEmail };
@@ -100,8 +105,9 @@ export function parseTransactions(text: string, file: string): Txn[] {
   return txns;
 }
 
+// D7: a manual file with no content at all means no pins, like a header-only one.
 export function parseManual(text: string, file: string): ManualPair[] {
-  const { rows } = readRows(text, file, ['ours_id', 'theirs_id']);
+  const { rows } = readRows(text, file, ['ours_id', 'theirs_id'], true);
   const errors: InputError[] = [];
   const pairs = rows.map(({ line, values }) => {
     for (const field of ['ours_id', 'theirs_id']) {

@@ -81,7 +81,7 @@ export function compareIds(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-// D4
+// D4: dedupe, skip pins that cannot apply (with warnings), then fail on conflicts among the rest.
 function resolvePins(manual: ManualPair[], ours: Txn[], theirs: Txn[], asOf: Decimal, warnings: InputError[]): Match[] {
   const unique = new Map<string, ManualPair>();
   for (const p of manual) {
@@ -89,26 +89,9 @@ function resolvePins(manual: ManualPair[], ours: Txn[], theirs: Txn[], asOf: Dec
     if (!unique.has(key)) unique.set(key, p);
   }
 
-  const errors: InputError[] = [];
-  const byOurs = new Map<string, ManualPair>();
-  const byTheirs = new Map<string, ManualPair>();
-  for (const p of unique.values()) {
-    const prevOurs = byOurs.get(p.oursId);
-    const prevTheirs = byTheirs.get(p.theirsId);
-    if (prevOurs) {
-      errors.push({ row: p.row, message: `ours_id '${p.oursId}' is also pinned to '${prevOurs.theirsId}' on row ${prevOurs.row}` });
-    }
-    if (prevTheirs) {
-      errors.push({ row: p.row, message: `theirs_id '${p.theirsId}' is also pinned to '${prevTheirs.oursId}' on row ${prevTheirs.row}` });
-    }
-    byOurs.set(p.oursId, prevOurs ?? p);
-    byTheirs.set(p.theirsId, prevTheirs ?? p);
-  }
-  if (errors.length) throw new ValidationError(errors);
-
   const oursById = new Map(ours.map((t) => [t.id, t]));
   const theirsById = new Map(theirs.map((t) => [t.id, t]));
-  const matches: Match[] = [];
+  const valid: { pin: ManualPair; ours: Txn; theirs: Txn }[] = [];
   for (const p of unique.values()) {
     const o = oursById.get(p.oursId);
     const t = theirsById.get(p.theirsId);
@@ -122,9 +105,27 @@ function resolvePins(manual: ManualPair[], ours: Txn[], theirs: Txn[], asOf: Dec
             ? `theirs '${t.id}' is after as_of`
             : null;
     if (problem || !o || !t) warnings.push({ row: p.row, message: `${problem}; pin skipped` });
-    else matches.push({ kind: 'manual', ours: o, theirs: t });
+    else valid.push({ pin: p, ours: o, theirs: t });
   }
-  return matches;
+
+  const errors: InputError[] = [];
+  const byOurs = new Map<string, ManualPair>();
+  const byTheirs = new Map<string, ManualPair>();
+  for (const { pin: p } of valid) {
+    const prevOurs = byOurs.get(p.oursId);
+    const prevTheirs = byTheirs.get(p.theirsId);
+    if (prevOurs) {
+      errors.push({ row: p.row, message: `ours_id '${p.oursId}' is also pinned to '${prevOurs.theirsId}' on row ${prevOurs.row}` });
+    }
+    if (prevTheirs) {
+      errors.push({ row: p.row, message: `theirs_id '${p.theirsId}' is also pinned to '${prevTheirs.oursId}' on row ${prevTheirs.row}` });
+    }
+    byOurs.set(p.oursId, prevOurs ?? p);
+    byTheirs.set(p.theirsId, prevTheirs ?? p);
+  }
+  if (errors.length) throw new ValidationError(errors);
+
+  return valid.map((v) => ({ kind: 'manual', ours: v.ours, theirs: v.theirs }));
 }
 
 interface Candidate {
