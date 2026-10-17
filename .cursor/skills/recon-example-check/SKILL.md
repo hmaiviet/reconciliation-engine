@@ -9,7 +9,7 @@ description: Runs the built `recon` CLI against every scenario in examples/ (or 
 
 ```sh
 npm run build
-node .cursor/skills/recon-example-check/scripts/check-scenarios.mjs
+node scripts/check-scenarios.mjs   # or: npm run check:examples (builds first)
 ```
 
 The script must be **executed**, not read. Options:

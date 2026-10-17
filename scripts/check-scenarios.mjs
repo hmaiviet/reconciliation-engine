@@ -3,7 +3,7 @@
 // the output to expected_report.json (canonical JSON: key order ignored, array order checked).
 //
 // Usage (from repo root):
-//   node .cursor/skills/recon-example-check/scripts/check-scenarios.mjs [--fuzzy] [--keep] [DIR ...]
+//   node scripts/check-scenarios.mjs [--fuzzy] [--keep] [DIR ...]
 // Env:
 //   RECON_CMD  command used to invoke the CLI (default: node "<repo>/dist/cli/main.js")
 import { spawnSync } from 'node:child_process';

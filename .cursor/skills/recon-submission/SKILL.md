@@ -20,7 +20,7 @@ disable-model-invocation: true
 
 ```sh
 npm run verify    # or: npm run build && npm test, if e2e tests aren't present
-node .cursor/skills/recon-example-check/scripts/check-scenarios.mjs
+npm run check:examples
 ```
 
 ## Clean-checkout smoke test

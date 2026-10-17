@@ -39,8 +39,8 @@ csv-parse handles quoted commas and multiline quoted fields. Do not split lines 
 ## Validation (collect all errors and report them together)
 
 - `id`: non-empty and unique within its own file.
-- `amount`, `price_per_share`: decimal strings (`^-?\d+(\.\d+)?$`). Whether to enforce exactly 2 decimal places is a contract decision.
-- `fx_rate`: decimal. Whether to enforce 6 decimal places is a contract decision.
+- `amount`, `price_per_share`: decimals with exactly 2 decimal places (`^-?\d+\.\d{2}$`), per contract D7.
+- `fx_rate`: decimal with exactly 6 decimal places, per contract D7.
 - `quantity`: integer string, kept within safe integer range.
 - `timestamp`: strict ISO UTC (see `recon-domain-types`).
 - `memo` may be empty. Extended string fields must be non-empty.
@@ -53,4 +53,4 @@ interface InputError { file: string; row?: number; field?: string; message: stri
 // rendered: "ours.csv:4: amount: '12,5' is not a decimal"
 ```
 
-`row` is the 1-based physical line from `info.lines`, so it still points at the right line when a record contains multiline fields. Throw one error that carries all collected `InputError`s.
+`row` is the 1-based physical line where the record starts. `info.lines` is where a record ends, so derive the start from the previous record's `info.lines` plus the blank lines skipped since (`info.empty_lines` delta) plus one. Throw one error that carries all collected `InputError`s.

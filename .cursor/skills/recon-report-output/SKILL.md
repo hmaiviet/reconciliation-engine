@@ -9,7 +9,7 @@ description: Builds report.json from engine results - summary counts, signed amo
 
 ```jsonc
 {
-  "as_of": "<the --as-of string as given>",
+  "as_of": "<--as-of normalized to YYYY-MM-DDTHH:MM:SS.sssZ>",
   "summary": { "matched_manual": 0, "matched_exact": 0, "matched_rule_based": 0,
                "matched_fuzzy": 0, "unmatched_ours": 0, "unmatched_theirs": 0 },
   "matches": [{ "kind": "...", "ours_id": "...", "theirs_id": "...",
@@ -20,7 +20,7 @@ description: Builds report.json from engine results - summary counts, signed amo
 ```
 
 - Always include all six summary keys. `matched_fuzzy` is `0` until the fuzzy tier exists.
-- Echo `as_of` as the original string. Do not re-serialize it through `Date`.
+- Normalize `as_of` to millisecond form, as in the ASSIGNMENT.md schema example (`2026-04-28T14:00:00.000Z`): `--as-of` has either no fraction or exactly 3 digits, so append `.000` when it is absent (contract D5, D7). Build the string from the input; do not re-serialize it through `Date`.
 
 ## Values
 
