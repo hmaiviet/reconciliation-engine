@@ -1,7 +1,6 @@
 import {
   Decimal,
   ValidationError,
-  type ExtendedFields,
   type InputError,
   type ManualPair,
   type Match,
@@ -16,7 +15,6 @@ export interface Tolerances {
 
 // D1
 export const DEFAULT_TOLERANCES: Tolerances = { amount: new Decimal('0.01'), seconds: new Decimal('1') };
-const ZERO: Tolerances = { amount: new Decimal(0), seconds: new Decimal(0) };
 // D10: never narrower than the rule-based amount tolerance; time uses the rule-based tolerance.
 const FUZZY_AMOUNT = new Decimal('0.05');
 const MAX_TEXT_DISTANCE = 0.1;
@@ -46,14 +44,18 @@ export function reconcile({ ours, theirs, manual, asOf, tolerances = DEFAULT_TOL
   let restTheirs = theirs.filter((t) => t.timestamp.lte(asOf) && !pinned.has(t));
 
   const fuzzyAmount = Decimal.max(FUZZY_AMOUNT, tolerances.amount);
-  const tiers: [MatchKind, Tolerances, Rank][] = [
-    ['exact', ZERO, (o, t) => (isExactCompatible(o, t) ? [] : null)],
-    ['rule_based', tolerances, (o, t) => (isRuleCompatible(o, t) ? [] : null)],
-    // Cross-currency amounts are not comparable, so fuzzyRank applies the amount tolerance itself.
-    ['fuzzy', { amount: new Decimal(Infinity), seconds: tolerances.seconds }, (o, t) => fuzzyRank(o, t, fuzzyAmount)],
+  const tiers: ((ours: Txn[], theirs: Txn[]) => Match[])[] = [
+    matchExact,
+    (o, t) => matchGroups(o, t, ruleIdentity, (go, gt) => matchTier('rule_based', go, gt, tolerances, () => [])),
+    // D10: mixed shapes and differing quantities never match fuzzy. Cross-currency amounts are not comparable,
+    // so fuzzyRank applies the amount tolerance itself.
+    (o, t) =>
+      matchGroups(o, t, (r) => r.extended?.quantity ?? null, (go, gt) =>
+        matchTier('fuzzy', go, gt, { amount: new Decimal(Infinity), seconds: tolerances.seconds }, (a, b) => fuzzyRank(a, b, fuzzyAmount)),
+      ),
   ];
-  for (const [kind, tol, rank] of tiers) {
-    const found = matchTier(kind, restOurs, restTheirs, tol, rank);
+  for (const tier of tiers) {
+    const found = tier(restOurs, restTheirs);
     const used = new Set(found.flatMap((m) => [m.ours, m.theirs]));
     restOurs = restOurs.filter((t) => !used.has(t));
     restTheirs = restTheirs.filter((t) => !used.has(t));
@@ -64,23 +66,59 @@ export function reconcile({ ours, theirs, manual, asOf, tolerances = DEFAULT_TOL
 }
 
 // D2: exact requires every extended field to agree; a mixed-shape pair matches on amount and timestamp alone.
-export function isExactCompatible(o: Txn, t: Txn): boolean {
-  const a = o.extended;
-  const b = t.extended;
-  if (!a || !b) return true;
-  return sameIdentity(a, b) && a.pricePerShare.eq(b.pricePerShare) && a.fxRate.eq(b.fxRate);
+// Every exact candidate ranks equally, so D3 reduces to: each ours in id order takes the lowest-id compatible theirs.
+// Records are hashed by value (decimal.js toString is canonical), so this is O(N log N) for the id sort instead of all pairs.
+function matchExact(ours: Txn[], theirs: Txn[]): Match[] {
+  const coarse = (t: Txn) => JSON.stringify([t.amount.toString(), t.timestamp.toString()]);
+  const fields = ({ extended: e }: Txn) =>
+    e && JSON.stringify([e.currency, e.partyEmail, e.quantity, e.pricePerShare.toString(), e.fxRate.toString()]);
+
+  // Lists hold theirs in descending id order, so the lowest id is last and used records pop off lazily.
+  const buckets = new Map<string, { all: Txn[]; simple: Txn[]; byFields: Map<string, Txn[]> }>();
+  for (const t of [...theirs].sort((a, b) => compareIds(b.id, a.id))) {
+    const key = coarse(t);
+    const bucket = buckets.get(key) ?? { all: [], simple: [], byFields: new Map<string, Txn[]>() };
+    buckets.set(key, bucket);
+    bucket.all.push(t);
+    const f = fields(t);
+    if (!f) bucket.simple.push(t);
+    else bucket.byFields.set(f, bucket.byFields.get(f) ?? []).get(f)!.push(t);
+  }
+
+  const used = new Set<Txn>();
+  const lowest = (list: Txn[] | undefined) => {
+    while (list?.length && used.has(list.at(-1)!)) list.pop();
+    return list?.at(-1);
+  };
+  const matches: Match[] = [];
+  for (const o of [...ours].sort((a, b) => compareIds(a.id, b.id))) {
+    const bucket = buckets.get(coarse(o));
+    if (!bucket) continue;
+    const f = fields(o);
+    const candidates = f ? [lowest(bucket.simple), lowest(bucket.byFields.get(f))] : [lowest(bucket.all)];
+    const t = candidates.filter((c) => c !== undefined).sort((a, b) => compareIds(a.id, b.id))[0];
+    if (!t) continue;
+    used.add(t);
+    matches.push({ kind: 'exact', ours: o, theirs: t });
+  }
+  return matches;
+}
+
+/** Matches each group on its own; valid when a tier never pairs records with different keys, since no candidate then competes across groups. */
+function matchGroups(ours: Txn[], theirs: Txn[], key: (t: Txn) => unknown, match: (o: Txn[], t: Txn[]) => Match[]): Match[] {
+  const groups = new Map<string, [Txn[], Txn[]]>();
+  const group = (t: Txn) => {
+    const k = JSON.stringify(key(t));
+    return groups.get(k) ?? groups.set(k, [[], []]).get(k)!;
+  };
+  for (const o of ours) group(o)[0].push(o);
+  for (const t of theirs) group(t)[1].push(t);
+  return [...groups.values()].flatMap(([o, t]) => match(o, t));
 }
 
 // D2: rule-based requires identity fields to agree (price and fx may drift), so a mixed-shape pair never qualifies.
-export function isRuleCompatible(o: Txn, t: Txn): boolean {
-  const a = o.extended;
-  const b = t.extended;
-  if (!a && !b) return true;
-  return !!a && !!b && sameIdentity(a, b);
-}
-
-function sameIdentity(a: ExtendedFields, b: ExtendedFields): boolean {
-  return a.currency === b.currency && a.partyEmail === b.partyEmail && a.quantity === b.quantity;
+function ruleIdentity({ extended: e }: Txn) {
+  return e ? [e.currency, e.partyEmail, e.quantity] : null;
 }
 
 /** Ranks within a tier before D3's diffs (lower first); null means the pair cannot match in that tier. */
@@ -89,38 +127,70 @@ type Rank = (o: Txn, t: Txn) => number[] | null;
 // D10: memo at least 90% similar. Extended records need equal quantity; with equal currency, amounts within tolerance
 // and a 90% similar party_email; with different currencies, an identical party_email and base values within tolerance.
 // Same-currency pairs outrank cross-currency ones, then party_email, then memo. Mixed shapes never match.
+// Cheap checks run before text distances, which dominate the tier's cost.
 export function fuzzyRank(o: Txn, t: Txn, amountTol: Decimal): number[] | null {
-  const memo = textDistance(o.raw.memo ?? '', t.raw.memo ?? '');
-  if (memo > MAX_TEXT_DISTANCE) return null;
-  const amountClose = o.amount.minus(t.amount).abs().lte(amountTol);
   const a = o.extended;
   const b = t.extended;
-  if (!a && !b) return amountClose ? [memo] : null;
-  if (!a || !b || a.quantity !== b.quantity) return null;
-  if (a.currency === b.currency) {
-    const email = textDistance(a.partyEmail, b.partyEmail);
-    return amountClose && email <= MAX_TEXT_DISTANCE ? [0, email, memo, 0] : null;
+  const amountClose = () => o.amount.minus(t.amount).abs().lte(amountTol);
+  if (!a || !b) {
+    const memo = !a && !b && amountClose() ? textDistance(texts(o).memo, texts(t).memo) : null;
+    return memo === null ? null : [memo];
   }
+  if (a.quantity !== b.quantity) return null;
+  if (a.currency === b.currency) {
+    if (!amountClose()) return null;
+    const memo = textDistance(texts(o).memo, texts(t).memo);
+    const email = memo === null ? null : textDistance(texts(o).email, texts(t).email);
+    return email === null ? null : [0, email, memo!, 0];
+  }
+  if (a.partyEmail !== b.partyEmail) return null;
   // amount = quantity × price_per_share × fx_rate (as in every example row), so amount ÷ fx_rate is the shared base value.
   const baseDiff = o.amount.div(a.fxRate).minus(t.amount.div(b.fxRate)).abs();
-  return a.partyEmail === b.partyEmail && baseDiff.lte(amountTol) ? [1, 0, memo, baseDiff.toNumber()] : null;
+  const memo = baseDiff.lte(amountTol) ? textDistance(texts(o).memo, texts(t).memo) : null;
+  return memo === null ? null : [1, 0, memo, baseDiff.toNumber()];
 }
 
-/** Edit distance (adjacent transpositions count as one edit) over the longer length, after trimming, lowercasing, and collapsing whitespace. */
-export function textDistance(x: string, y: string): number {
-  const a = [...x.trim().replace(/\s+/g, ' ').toLowerCase()];
-  const b = [...y.trim().replace(/\s+/g, ' ').toLowerCase()];
+const normalized = new WeakMap<Txn, { memo: string[]; email: string[] }>();
+
+/** Memo and party_email as characters after trimming, lowercasing, and collapsing whitespace; computed once per record. */
+function texts(t: Txn) {
+  const clean = (s: string) => [...s.trim().replace(/\s+/g, ' ').toLowerCase()];
+  let n = normalized.get(t);
+  if (!n) normalized.set(t, (n = { memo: clean(t.raw.memo ?? ''), email: clean(t.extended?.partyEmail ?? '') }));
+  return n;
+}
+
+/**
+ * Edit distance (adjacent transpositions count as one edit) over the longer length, or null when above
+ * MAX_TEXT_DISTANCE. Only cells within k of the diagonal can stay within k edits, so the rest are skipped,
+ * and the scan stops once a whole row exceeds k.
+ */
+export function textDistance(a: string[], b: string[]): number | null {
+  const longest = Math.max(a.length, b.length);
   // Two empty strings carry no evidence, so they count as fully different.
-  if (!a.length && !b.length) return 1;
-  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
+  if (!longest) return null;
+  // ceil keeps the band at least as wide as needed; the exact ratio check below decides.
+  const k = Math.ceil(longest * MAX_TEXT_DISTANCE);
+  if (Math.abs(a.length - b.length) > k) return null;
+  const far = k + 1;
+  let before: number[] = [];
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => Math.min(j, far));
   for (let i = 1; i <= a.length; i++) {
-    const row = d[i]!;
-    for (let j = 1; j <= b.length; j++) {
-      row[j] = Math.min(d[i - 1]![j]! + 1, row[j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) row[j] = Math.min(row[j]!, d[i - 2]![j - 2]! + 1);
+    const row = new Array<number>(b.length + 1).fill(far);
+    row[0] = Math.min(i, far);
+    let rowMin = row[0];
+    for (let j = Math.max(1, i - k); j <= Math.min(b.length, i + k); j++) {
+      let v = Math.min(prev[j]! + 1, row[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, before[j - 2]! + 1);
+      row[j] = v = Math.min(v, far);
+      rowMin = Math.min(rowMin, v);
     }
+    if (rowMin > k) return null;
+    before = prev;
+    prev = row;
   }
-  return d[a.length]![b.length]! / Math.max(a.length, b.length);
+  const distance = prev[b.length]! / longest;
+  return distance <= MAX_TEXT_DISTANCE ? distance : null;
 }
 
 export function compareIds(a: string, b: string): number {

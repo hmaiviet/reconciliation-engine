@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { textDistance } from '../../src/domain/reconcile.js';
 import { ValidationError } from '../../src/domain/types.js';
 import { ext, pairs, run, txn, unmatched } from '../helpers/builders.js';
 
@@ -135,6 +136,11 @@ describe('exact', () => {
     expect(pairs(run({ ours: [txn('o-1')], theirs: [ext('t-1')] }))).toEqual([['exact', 'o-1', 't-1']]);
   });
 
+  it('exact: mixed shapes pair by id order; a taken extended partner falls back to a simple one (D2, D3)', () => {
+    const r = run({ ours: [ext('o-2'), txn('o-1')], theirs: [txn('t-2'), ext('t-1')] });
+    expect(pairs(r)).toEqual([['exact', 'o-1', 't-1'], ['exact', 'o-2', 't-2']]);
+  });
+
   it('tiers: exact pairs are taken before any rule-based pair', () => {
     // A single ranking by diffs then ids would pick o-1/t-1 (rule-based, fx drift) before o-1/t-2 (exact).
     const r = run({ ours: [ext('o-1')], theirs: [ext('t-1', { fx_rate: '1.100000' }), ext('t-2')] });
@@ -252,6 +258,14 @@ describe('rule-based (D1)', () => {
     expect(pairs(run({ ours: [ext('o-1')], theirs: [ext('t-1', { amount: '100.01', ...fields })] }))).toEqual([]);
   });
 
+  it('rule-based: identity groups in the same time window each match within their own group (D2)', () => {
+    const r = run({
+      ours: [ext('o-1'), ext('o-2', { currency: 'EUR' }), txn('o-3')],
+      theirs: [ext('t-1', { amount: '100.01', currency: 'EUR' }), txn('t-2', { amount: '99.99' }), ext('t-3', { amount: '100.01' })],
+    });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-3'], ['rule_based', 'o-2', 't-1'], ['rule_based', 'o-3', 't-2']]);
+  });
+
   it('rule-based: a simple and an extended record never match rule-based (D2 mixed shapes)', () => {
     const r = run({ ours: [txn('o-1')], theirs: [ext('t-1', { amount: '100.01' })] });
     expect(pairs(r)).toEqual([]);
@@ -305,6 +319,33 @@ describe('fuzzy (D10)', () => {
   it('fuzzy: an identical memo outranks a closer amount', () => {
     const r = run({ ours: [shop('o-1', 'Coffee Shop')], theirs: [shop('t-1', 'Coffee Shop', '100.04'), shop('t-2', 'Cofee Shop', '100.02')] });
     expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: banded text distance agrees with the full edit distance', () => {
+    const full = (a: string[], b: string[]) => {
+      const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
+      for (let i = 1; i <= a.length; i++) {
+        for (let j = 1; j <= b.length; j++) {
+          d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+          if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+        }
+      }
+      const distance = d[a.length]![b.length]! / Math.max(a.length, b.length);
+      return a.length + b.length && distance <= 0.1 ? distance : null;
+    };
+    let seed = 1;
+    const rand = (n: number) => ((seed = (seed * 48271) % 2147483647) % n);
+    const word = () => Array.from({ length: rand(25) }, () => 'abc'[rand(3)]!);
+    const typo = (w: string[]) => {
+      const c = [...w];
+      for (let n = rand(4); n > 0 && c.length; n--) c.splice(rand(c.length), rand(2), ...(rand(2) ? ['a'] : []));
+      return c;
+    };
+    for (let i = 0; i < 5000; i++) {
+      const a = word();
+      const b = rand(2) ? typo(a) : word();
+      expect(textDistance(a, b), `${a.join('')} vs ${b.join('')}`).toBe(full(a, b));
+    }
   });
 
   it('fuzzy: only sees records the rule-based tier left', () => {
