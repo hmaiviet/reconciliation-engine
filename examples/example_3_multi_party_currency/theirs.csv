@@ -1,0 +1,5 @@
+id,amount,timestamp,memo,currency,quantity,price_per_share,fx_rate,party_email
+t-101,1000.00,2026-05-01T10:00:00.000Z,,USD,100,10.00,1.000000,alice@acme.com
+t-102,10000.01,2026-05-01T11:00:00.500Z,fx-drift,EUR,1000,10.00,1.000001,bob@acme.com
+t-103,500.00,2026-05-01T12:00:00.000Z,euro-side,EUR,10,50.00,1.000000,carol@acme.com
+t-104,1000.00,2026-05-01T13:00:00.000Z,USD-side,USD,250,4.00,1.000000,bob@acme.com

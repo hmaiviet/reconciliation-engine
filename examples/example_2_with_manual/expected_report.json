@@ -1,0 +1,41 @@
+{
+  "as_of": "2026-04-01T23:59:59.999Z",
+  "summary": {
+    "matched_manual": 1,
+    "matched_exact": 1,
+    "matched_rule_based": 0,
+    "matched_fuzzy": 0,
+    "unmatched_ours": 1,
+    "unmatched_theirs": 1
+  },
+  "matches": [
+    {
+      "kind": "manual",
+      "ours_id": "o-002",
+      "theirs_id": "t-102",
+      "amount_diff": "-949.99",
+      "timestamp_diff_seconds": "-14400.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-001",
+      "theirs_id": "t-101",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    }
+  ],
+  "unmatched_ours": [
+    {
+      "id": "o-003",
+      "amount": "300.00",
+      "timestamp": "2026-04-01T12:00:00.000Z"
+    }
+  ],
+  "unmatched_theirs": [
+    {
+      "id": "t-103",
+      "amount": "75.00",
+      "timestamp": "2026-04-01T16:00:00.000Z"
+    }
+  ]
+}

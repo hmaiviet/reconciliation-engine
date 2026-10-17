@@ -1,0 +1,58 @@
+{
+  "as_of": "2026-05-01T23:59:59.999Z",
+  "summary": {
+    "matched_manual": 1,
+    "matched_exact": 1,
+    "matched_rule_based": 1,
+    "matched_fuzzy": 0,
+    "unmatched_ours": 1,
+    "unmatched_theirs": 1
+  },
+  "matches": [
+    {
+      "kind": "manual",
+      "ours_id": "o-004",
+      "theirs_id": "t-104",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-001",
+      "theirs_id": "t-101",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "rule_based",
+      "ours_id": "o-002",
+      "theirs_id": "t-102",
+      "amount_diff": "-0.01",
+      "timestamp_diff_seconds": "-0.500"
+    }
+  ],
+  "unmatched_ours": [
+    {
+      "id": "o-003",
+      "amount": "500.00",
+      "timestamp": "2026-05-01T12:00:00.000Z",
+      "currency": "USD",
+      "quantity": 10,
+      "price_per_share": "50.00",
+      "fx_rate": "1.000000",
+      "party_email": "alice@acme.com"
+    }
+  ],
+  "unmatched_theirs": [
+    {
+      "id": "t-103",
+      "amount": "500.00",
+      "timestamp": "2026-05-01T12:00:00.000Z",
+      "currency": "EUR",
+      "quantity": 10,
+      "price_per_share": "50.00",
+      "fx_rate": "1.000000",
+      "party_email": "carol@acme.com"
+    }
+  ]
+}

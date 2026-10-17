@@ -1,0 +1,36 @@
+{
+  "as_of": "2026-05-01T23:59:59.999Z",
+  "summary": {
+    "matched_manual": 0,
+    "matched_exact": 1,
+    "matched_rule_based": 1,
+    "matched_fuzzy": 1,
+    "unmatched_ours": 0,
+    "unmatched_theirs": 0
+  },
+  "matches": [
+    {
+      "kind": "exact",
+      "ours_id": "o-001",
+      "theirs_id": "t-101",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "rule_based",
+      "ours_id": "o-002",
+      "theirs_id": "t-102",
+      "amount_diff": "-0.01",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "fuzzy",
+      "ours_id": "o-003",
+      "theirs_id": "t-103",
+      "amount_diff": "-0.03",
+      "timestamp_diff_seconds": "0.000"
+    }
+  ],
+  "unmatched_ours": [],
+  "unmatched_theirs": []
+}

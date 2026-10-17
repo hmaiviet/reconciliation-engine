@@ -1,0 +1,4 @@
+id,amount,timestamp,memo
+t-101,100.00,2026-05-01T10:00:00.000Z,Coffee Shop
+t-102,200.01,2026-05-01T11:00:00.000Z,Lunch
+t-103,300.03,2026-05-01T12:00:00.000Z,Cofee Shop

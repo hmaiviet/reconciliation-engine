@@ -1,0 +1,50 @@
+{
+  "as_of": "2026-04-01T23:59:59.999Z",
+  "summary": {
+    "matched_manual": 0,
+    "matched_exact": 5,
+    "matched_rule_based": 0,
+    "matched_fuzzy": 0,
+    "unmatched_ours": 0,
+    "unmatched_theirs": 0
+  },
+  "matches": [
+    {
+      "kind": "exact",
+      "ours_id": "o-001",
+      "theirs_id": "t-101",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-002",
+      "theirs_id": "t-102",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-003",
+      "theirs_id": "t-103",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-004",
+      "theirs_id": "t-104",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    },
+    {
+      "kind": "exact",
+      "ours_id": "o-005",
+      "theirs_id": "t-105",
+      "amount_diff": "0.00",
+      "timestamp_diff_seconds": "0.000"
+    }
+  ],
+  "unmatched_ours": [],
+  "unmatched_theirs": []
+}

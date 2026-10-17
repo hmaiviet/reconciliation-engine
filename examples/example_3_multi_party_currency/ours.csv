@@ -1,0 +1,5 @@
+id,amount,timestamp,memo,currency,quantity,price_per_share,fx_rate,party_email
+o-001,1000.00,2026-05-01T10:00:00.000Z,first-buy,USD,100,10.00,1.000000,alice@acme.com
+o-002,10000.00,2026-05-01T11:00:00.000Z,bigger-buy,EUR,1000,10.00,1.000000,bob@acme.com
+o-003,500.00,2026-05-01T12:00:00.000Z,USD-buy,USD,10,50.00,1.000000,alice@acme.com
+o-004,1000.00,2026-05-01T13:00:00.000Z,euro-buy,EUR,200,5.00,1.000000,bob@acme.com
