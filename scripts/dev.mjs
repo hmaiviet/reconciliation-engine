@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Starts the API (127.0.0.1:3001, rebuilt by tsc --watch) and the Vite GUI (127.0.0.1:5173).
+// API_PORT and WEB_PORT override the ports.
 // Ctrl+C stops everything; if any process exits, the others are stopped too.
 import { spawn, spawnSync } from 'node:child_process';
 

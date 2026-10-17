@@ -18,7 +18,6 @@ The script must be **executed**, not read. Options:
 | --- | --- |
 | `DIR ...` | Check specific scenario dirs instead of all of `examples/*` |
 | `--keep` | Keep temp working dirs and print their paths for inspection |
-| `--fuzzy` | Treat fuzzy scenarios as required (use once the fuzzy tier exists) |
 | `RECON_CMD="recon"` | Invoke a linked or installed binary instead of `dist/cli/main.js` |
 
 A scenario directory contains `ours.csv`, `theirs.csv`, `manual.csv`, `as_of.txt`, and `expected_report.json`.
@@ -36,9 +35,5 @@ A scenario directory contains `ours.csv`, `theirs.csv`, `manual.csv`, `as_of.txt
 | `PASS` | Matches the expected report |
 | `FAIL` | Shows the first differing path, e.g. `$.matches[1].kind: got "exact", expected "rule_based"` |
 | `ERROR` | The CLI failed. Its stderr is shown |
-| `XFAIL` | The scenario expects fuzzy matches that are not implemented yet. This is expected and does not fail the run |
-| `XPASS` | A fuzzy scenario passed |
 
-Exit code 1 means at least one `FAIL` or `ERROR`. To investigate a failure, use the `recon-debug-scenario` skill.
-
-Example 4 shows `XFAIL` until the fuzzy tier exists. Never edit its `expected_report.json`. The non-fuzzy expectation for it belongs in the test suite.
+Exit code 1 means at least one `FAIL` or `ERROR`. To investigate a failure, use the `recon-debug-scenario` skill. Never edit a supplied `expected_report.json`.

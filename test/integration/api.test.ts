@@ -20,7 +20,7 @@ const post = (payload: unknown) => app.inject({ method: 'POST', url: '/reconcile
 const EXAMPLES = ['example_1_basic', 'example_2_with_manual', 'example_3_multi_party_currency', 'example_4_fuzzy_memo'];
 
 describe('api: POST /reconcile (D8)', () => {
-  it.each(EXAMPLES.slice(0, 3))('api: %s returns the expected report', async (name) => {
+  it.each(EXAMPLES)('api: %s returns the expected report', async (name) => {
     const res = await post(exampleBody(name));
     expect(res.statusCode).toBe(200);
     expect(res.json().report).toEqual(JSON.parse(read(`examples/${name}/expected_report.json`)));

@@ -10,7 +10,7 @@ Build a local reconciliation tool in Node.js and TypeScript, starting with a dep
 - Run the CLI, API, GUI, and all tests locally.
 - Keep the project in one repository with one shared matching engine.
 - Add small correctness tests during CLI implementation; expand them into a comprehensive test system in milestone 2.
-- Defer fuzzy matching until all four milestones are complete.
+- Defer fuzzy matching until all four milestones are complete (now implemented, contract D10).
 - Deployment, cloud services, database persistence, and hosted CI are outside the current scope.
 
 The assignment budgets approximately one working day. All four milestones may exceed that budget, so each milestone should leave a working, defensible deliverable. Matching correctness and the tested CLI take priority.
@@ -157,7 +157,7 @@ Turn each agreed behavior into a named test. Start with this matrix:
 | Reports | Ordering, summary counts, unmatched fields, deterministic output |
 | Invariants | No double matching; every eligible record appears exactly once |
 
-Example 4 requires a separately named, documented non-fuzzy expectation until fuzzy matching is implemented. Do not modify its supplied expected report.
+Example 4 needs the fuzzy tier (D10) and is asserted against its supplied expected report like the others. Do not modify any supplied expected report.
 
 ### 2.4 Test the engine and reporting functions directly
 
@@ -278,7 +278,7 @@ Provide one command that type-checks, builds, runs unit/integration tests, and r
 
 ## Proposed local commands
 
-These commands are planned interfaces, not yet implemented.
+All implemented; the README lists them with the additional `typecheck` and `check:examples` commands.
 
 | Command | Purpose |
 | --- | --- |
@@ -292,7 +292,7 @@ These commands are planned interfaces, not yet implemented.
 
 ## Deferred work and risks
 
-- Fuzzy matching is an optional bonus after the four milestones.
+- Fuzzy matching was an optional bonus after the four milestones; it is implemented per contract D10.
 - Deployment, cloud services, database persistence, and hosted CI are not planned.
 - Matching thresholds, extended-field semantics, ambiguity handling, and output precision remain decisions to resolve together before dependent implementation.
 - The full plan may exceed the assignment's one-day budget; the tested CLI is the first deliverable.

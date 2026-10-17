@@ -12,23 +12,14 @@ npm i -D @playwright/test
 npx playwright install chromium
 ```
 
-`playwright.config.ts` essentials:
+`playwright.config.ts` (already in the repo) starts both servers on dedicated ports via env overrides:
 
-```ts
-export default defineConfig({
-  testDir: 'e2e',
-  fullyParallel: false,
-  use: { baseURL: 'http://127.0.0.1:5273', trace: 'retain-on-failure', screenshot: 'only-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: [
-    { command: 'node dist/api/server.js --port 5274', url: 'http://127.0.0.1:5274/health', reuseExistingServer: false },
-    { command: 'npm --prefix web run dev -- --port 5273 --strictPort', url: 'http://127.0.0.1:5273', reuseExistingServer: false },
-  ],
-});
-```
+- API: `npm run build && node dist/api/server.js` with `API_PORT=3101`, readiness by `port`.
+- GUI: `npx vite web` with `WEB_PORT=5273 API_PORT=3101` (the Vite proxy follows `API_PORT`), readiness by `url`.
+- `reuseExistingServer: false` (and Vite's `strictPort`) make a port collision fail loudly instead of silently testing a stale server.
+- `trace: 'retain-on-failure'`, `screenshot: 'only-on-failure'`, `preserveOutput: 'failures-only'`.
 
-- Use dedicated test ports different from `npm run dev`. `reuseExistingServer: false` and `--strictPort` make a port collision fail loudly instead of silently testing a stale server.
-- The API needs a `GET /health` endpoint for the readiness check.
+In a sandboxed agent shell, `PLAYWRIGHT_BROWSERS_PATH` may point at a temp cache; run with `env -u PLAYWRIGHT_BROWSERS_PATH` to use the normal browser install.
 
 ## Isolation
 
@@ -66,4 +57,4 @@ npx playwright show-report
 
 ## Verify command
 
-`"verify": "npm run typecheck && npm run build && npm test && npm run test:e2e"` runs everything with no manually started servers.
+`"verify": "npm run typecheck && npm test && npm run check:examples && npm run test:e2e"` runs everything with no manually started servers (`npm test` builds first).

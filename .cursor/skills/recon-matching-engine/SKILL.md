@@ -45,4 +45,4 @@ Put each tier's predicate in its own small function (`isExactMatch(o, t)`, `isRu
 
 ## Fuzzy tier
 
-This tier is deferred until milestones 1-4 are complete. When it is added, it runs after the rule-based tier and follows the same consumption and determinism rules.
+Runs after the rule-based tier with the same consumption and determinism rules (contract D10). `fuzzyRank(o, t, amountTol)` returns null when the pair cannot match, or a rank (cross-currency flag, party_email distance, memo distance, base value diff) that orders candidates before D3's diffs. It applies the amount tolerance itself, because cross-currency pairs compare `amount ÷ fx_rate` instead of raw amounts.

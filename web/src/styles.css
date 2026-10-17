@@ -101,8 +101,38 @@ input[type='checkbox'] {
   gap: 0.5rem 1.5rem;
 }
 
-.section-head p {
+.section-head p,
+.masthead .title p {
   margin-top: 0.3rem;
+}
+
+.mode {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.mode[hidden] {
+  display: none;
+}
+
+/* Segmented control: the pressed button is the active mode. */
+.modes {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.modes button {
+  border-color: transparent;
+}
+
+.modes button[aria-pressed='true'],
+.modes button[aria-pressed='true']:hover {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .card {
@@ -534,11 +564,11 @@ tr.differs td {
   gap: 1rem;
 }
 
-.records tbody tr {
+.records tr.pickable {
   cursor: pointer;
 }
 
-.records tbody tr:hover {
+.records tr.pickable:hover {
   background: var(--raised);
 }
 

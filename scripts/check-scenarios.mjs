@@ -3,7 +3,7 @@
 // the output to expected_report.json (canonical JSON: key order ignored, array order checked).
 //
 // Usage (from repo root):
-//   node scripts/check-scenarios.mjs [--fuzzy] [--keep] [DIR ...]
+//   node scripts/check-scenarios.mjs [--keep] [DIR ...]
 // Env:
 //   RECON_CMD  command used to invoke the CLI (default: node "<repo>/dist/cli/main.js")
 import { spawnSync } from 'node:child_process';
@@ -12,7 +12,6 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
-const strictFuzzy = args.includes('--fuzzy');
 const keep = args.includes('--keep');
 const dirArgs = args.filter((a) => !a.startsWith('--'));
 
@@ -72,7 +71,6 @@ for (const dir of dirs) {
   const name = basename(dir);
   const asOf = readFileSync(join(dir, 'as_of.txt'), 'utf8').trim();
   const expected = JSON.parse(readFileSync(join(dir, 'expected_report.json'), 'utf8'));
-  const needsFuzzy = (expected.summary?.matched_fuzzy ?? 0) > 0 && !strictFuzzy;
 
   const a = runOnce(dir, asOf);
   if (a.status !== 0 || a.raw === null) {
@@ -96,8 +94,7 @@ for (const dir of dirs) {
     continue;
   }
   const diff = firstDiff(actual, expected);
-  if (!diff) console.log(`${needsFuzzy ? 'XPASS' : 'PASS '} ${name}`);
-  else if (needsFuzzy) console.log(`XFAIL ${name}: needs fuzzy tier (${diff})`);
+  if (!diff) console.log(`PASS  ${name}`);
   else {
     console.log(`FAIL  ${name}: ${diff}`);
     failed++;

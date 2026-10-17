@@ -259,6 +259,155 @@ describe('rule-based (D1)', () => {
   });
 });
 
+describe('fuzzy (D10)', () => {
+  const shop = (id: string, memo: string, amount = '100.00') => txn(id, { memo, amount });
+
+  it('fuzzy: memo typo with a 0.03 amount diff matches (example 4 o-003/t-103)', () => {
+    const r = run({ ours: [shop('o-1', 'Coffee Shop', '300.00')], theirs: [shop('t-1', 'Cofee Shop', '300.03')] });
+    expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: identical memos with an amount diff above the rule-based tolerance match', () => {
+    expect(pairs(run({ ours: [shop('o-1', 'lunch')], theirs: [shop('t-1', 'lunch', '100.02')] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: amount diff exactly at 0.05 matches, 0.06 stays unmatched', () => {
+    expect(pairs(run({ ours: [shop('o-1', 'lunch')], theirs: [shop('t-1', 'lunch', '100.05')] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+    expect(pairs(run({ ours: [shop('o-1', 'lunch')], theirs: [shop('t-1', 'lunch', '99.94')] }))).toEqual([]);
+  });
+
+  it('fuzzy: timestamp diff above the rule-based tolerance stays unmatched', () => {
+    const r = run({ ours: [shop('o-1', 'lunch')], theirs: [txn('t-1', { memo: 'lunch', amount: '100.02', timestamp: '2026-01-01T10:00:01.001Z' })] });
+    expect(pairs(r)).toEqual([]);
+  });
+
+  it('fuzzy: memo exactly 90% similar matches (1 edit in 10 characters)', () => {
+    expect(pairs(run({ ours: [shop('o-1', 'coffee bar')], theirs: [shop('t-1', 'cofee bar', '100.02')] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: memo below 90% similar stays unmatched (1 edit in 9 characters)', () => {
+    expect(pairs(run({ ours: [shop('o-1', 'groceries')], theirs: [shop('t-1', 'grocerias', '100.02')] }))).toEqual([]);
+  });
+
+  it('fuzzy: an adjacent transposition counts as one edit', () => {
+    expect(pairs(run({ ours: [shop('o-1', 'coffee shop')], theirs: [shop('t-1', 'cofefe shop', '100.02')] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: memos compare ignoring case and repeated or surrounding whitespace', () => {
+    expect(pairs(run({ ours: [shop('o-1', ' COFFEE   shop')], theirs: [shop('t-1', 'coffee shop ', '100.02')] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: empty memos are no evidence and never match', () => {
+    expect(pairs(run({ ours: [shop('o-1', '')], theirs: [shop('t-1', '', '100.02')] }))).toEqual([]);
+    expect(pairs(run({ ours: [shop('o-1', 'lunch')], theirs: [shop('t-1', '', '100.02')] }))).toEqual([]);
+  });
+
+  it('fuzzy: an identical memo outranks a closer amount', () => {
+    const r = run({ ours: [shop('o-1', 'Coffee Shop')], theirs: [shop('t-1', 'Coffee Shop', '100.04'), shop('t-2', 'Cofee Shop', '100.02')] });
+    expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-1']]);
+  });
+
+  it('fuzzy: only sees records the rule-based tier left', () => {
+    const r = run({ ours: [shop('o-1', 'Coffee Shop')], theirs: [shop('t-1', 'refund', '100.01'), shop('t-2', 'Coffee Shop', '100.03')] });
+    expect(pairs(r)).toEqual([['rule_based', 'o-1', 't-1']]);
+    expect(unmatched(r)).toEqual({ ours: [], theirs: ['t-2'] });
+  });
+
+  describe('extended', () => {
+    const alice = (id: string, fields: Parameters<typeof ext>[1] = {}) =>
+      ext(id, { memo: 'first-buy', party_email: 'alice@acme.com', ...fields });
+
+    it('fuzzy: amount tolerance widens with a larger --amount-tolerance', () => {
+      const s = { ours: [alice('o-1')], theirs: [alice('t-1', { amount: '100.08', party_email: 'alice@acme.con' })] };
+      expect(pairs(run(s))).toEqual([]);
+      expect(pairs(run({ ...s, tolerances: { amount: '0.10' } }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+    });
+
+    it('fuzzy: party_email typo with a similar memo matches', () => {
+      expect(pairs(run({ ours: [alice('o-1')], theirs: [alice('t-1', { party_email: 'alice@acme.con' })] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+    });
+
+    it('fuzzy: party_email differing only in case matches fuzzy, not rule-based', () => {
+      expect(pairs(run({ ours: [alice('o-1')], theirs: [alice('t-1', { party_email: 'Alice@acme.com' })] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+    });
+
+    it('fuzzy: price and fx drift are allowed as in rule-based', () => {
+      const r = run({ ours: [alice('o-1')], theirs: [alice('t-1', { party_email: 'alice@acme.con', price_per_share: '100.03', fx_rate: '1.000001' })] });
+      expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-1']]);
+    });
+
+    it.each([
+      ['quantity', { quantity: '2' }],
+      ['party_email beyond a typo', { party_email: 'carol@acme.com' }],
+      ['memo below 90%', { memo: 'second-buy' }],
+    ])('fuzzy: differing %s stays unmatched even when everything else is similar', (_, fields) => {
+      expect(pairs(run({ ours: [alice('o-1')], theirs: [alice('t-1', { amount: '100.02', ...fields })] }))).toEqual([]);
+    });
+
+    it('fuzzy: example 3 o-003/t-103 stays unmatched (currency and party differ)', () => {
+      const r = run({
+        ours: [ext('o-1', { memo: 'USD-buy', currency: 'USD', party_email: 'alice@acme.com' })],
+        theirs: [ext('t-1', { memo: 'euro-side', currency: 'EUR', party_email: 'carol@acme.com' })],
+      });
+      expect(pairs(r)).toEqual([]);
+    });
+
+    it('fuzzy: a closer party_email outranks a closer memo', () => {
+      const r = run({
+        ours: [alice('o-1', { memo: 'coffee shop' })],
+        theirs: [
+          alice('t-1', { memo: 'coffee shop', party_email: 'alice@acme.con' }),
+          alice('t-2', { memo: 'cofee shop', amount: '100.02' }),
+        ],
+      });
+      expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-2']]);
+    });
+
+    it('fuzzy: a simple and an extended record never match fuzzy (mixed shapes)', () => {
+      expect(pairs(run({ ours: [shop('o-1', 'first-buy')], theirs: [alice('t-1', { amount: '100.02' })] }))).toEqual([]);
+    });
+
+    describe('different currencies', () => {
+      // ours: USD 1 × 100.00 at fx 1.000000 = 100.00, i.e. base value 100.00.
+      const eur = (fields: Parameters<typeof ext>[1]) => alice('t-1', { currency: 'EUR', ...fields });
+
+      it('fuzzy: same base value (amount ÷ fx_rate) matches although amounts differ by more than 0.05', () => {
+        expect(pairs(run({ ours: [alice('o-1')], theirs: [eur({ amount: '92.00', fx_rate: '0.920000' })] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+      });
+
+      it('fuzzy: base value diff exactly at 0.05 matches, 0.06 stays unmatched', () => {
+        expect(pairs(run({ ours: [alice('o-1')], theirs: [eur({ amount: '200.10', fx_rate: '2.000000' })] }))).toEqual([['fuzzy', 'o-1', 't-1']]);
+        expect(pairs(run({ ours: [alice('o-1')], theirs: [eur({ amount: '200.12', fx_rate: '2.000000' })] }))).toEqual([]);
+      });
+
+      it('fuzzy: equal amounts with different fx rates are different base values', () => {
+        expect(pairs(run({ ours: [alice('o-1')], theirs: [eur({ fx_rate: '0.920000' })] }))).toEqual([]);
+      });
+
+      it.each([
+        ['a party_email typo', { party_email: 'alice@acme.con' }],
+        ['a different quantity', { quantity: '2', price_per_share: '50.00' }],
+        ['memo below 90%', { memo: 'second-buy' }],
+      ])('fuzzy: %s stays unmatched', (_, fields) => {
+        expect(pairs(run({ ours: [alice('o-1')], theirs: [eur(fields)] }))).toEqual([]);
+      });
+
+      it('fuzzy: example 3 o-004/t-104 without its pin stays unmatched (quantity differs)', () => {
+        const r = run({
+          ours: [ext('o-1', { amount: '1000.00', currency: 'EUR', quantity: '200', price_per_share: '5.00', memo: 'buy' })],
+          theirs: [ext('t-1', { amount: '1000.00', currency: 'USD', quantity: '250', price_per_share: '4.00', memo: 'buy' })],
+        });
+        expect(pairs(r)).toEqual([]);
+      });
+
+      it('fuzzy: a same-currency candidate outranks a closer cross-currency one', () => {
+        const r = run({ ours: [alice('o-1')], theirs: [eur({}), alice('t-2', { amount: '100.03' })] });
+        expect(pairs(r)).toEqual([['fuzzy', 'o-1', 't-2']]);
+      });
+    });
+  });
+});
+
 describe('time / cutoff', () => {
   const asOf = '2026-01-01T12:00:00.000Z';
 

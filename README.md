@@ -40,7 +40,7 @@ Set `RECON_DEBUG=1` to print stack traces for unexpected errors.
 npm run dev
 ```
 
-This builds once, then runs the TypeScript compiler in watch mode, the API on <http://127.0.0.1:3001> (restarted on change), and the GUI on <http://127.0.0.1:5173> (Vite, which proxies `/reconcile` to the API). Open the GUI URL. Ctrl+C stops all three; if one fails to start (e.g. a port is taken), the others stop too. Use another GUI port with `WEB_PORT=5174 npm run dev`. Both servers bind to localhost only and are meant for local development.
+This builds once, then runs the TypeScript compiler in watch mode, the API on <http://127.0.0.1:3001> (restarted on change), and the GUI on <http://127.0.0.1:5173> (Vite, which proxies `/reconcile` to the API). Open the GUI URL. Ctrl+C stops all three; if one fails to start (e.g. a port is taken), the others stop too. Change ports with `WEB_PORT` and `API_PORT`, e.g. `WEB_PORT=5174 npm run dev`. Both servers bind to localhost only and are meant for local development.
 
 In the GUI: choose the CSV files, enter the UTC cutoff, and run. Results show the summary, matches per tier, and every eligible record, including `memo` (shown in the GUI only; `report.json` omits it). Select one record per side to pin them, remove pins, and run again. "Download manual.csv" saves the current pins; running the CLI with that file reproduces the GUI's report. Nothing is saved on reload. Details: [D9](docs/matching-contract.md#d9-gui-behavior).
 
@@ -64,11 +64,13 @@ It returns `200 { report, warnings, tolerances, records, pins }`, where `report`
 | --- | --- |
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm run dev` | Start the API and GUI with live reload (see above) |
-| `npm run typecheck` | Type-check `src/`, `test/`, and `web/` without emitting |
+| `npm run typecheck` | Type-check `src/`, `test/`, `e2e/`, and `web/` without emitting |
 | `npm test` | Build, then run all unit, CLI, and API integration tests once |
 | `npm run test:watch` | Re-run tests on change (integration tests use the last build) |
 | `npm run test:coverage` | Build, test, and print a coverage report |
 | `npm run check:examples` | Build, then run every scenario in `examples/` from a fresh temp directory and compare to `expected_report.json` (`scripts/check-scenarios.mjs`) |
+| `npm run test:e2e` | Run the Playwright browser tests (starts its own API and GUI) |
+| `npm run verify` | Everything: typecheck, build, unit and integration tests, examples check, browser tests |
 
 ## Tests
 
@@ -78,10 +80,30 @@ test/
   integration/   run the built dist/cli/main.js as a child process in temp directories;
                  call the API in-process with Fastify inject, including CLI/API report equality
   helpers/       transaction builders, invariant checks, CLI runner
-  fixtures/      CSV files and the non-fuzzy expectation for example 4
+  fixtures/      CSV files for parsing and CLI tests
+e2e/             Playwright tests driving the real GUI, API, and engine in Chromium
 ```
 
 Run one area with `npx vitest run test/unit` or one test by name with `npx vitest run -t "rule-based"`. Test names cite the contract decision they cover, e.g. `(D1)`. Every engine test also checks the invariants: each eligible record appears exactly once, and nothing after `as_of` appears. Coverage for `src/cli` reads 0% because it only runs in child processes; the integration tests cover it.
+
+### Browser tests
+
+One-time setup after `npm ci`:
+
+```sh
+npx playwright install chromium
+```
+
+`npm run test:e2e` builds the project, starts the API on 127.0.0.1:3101 and the GUI on 127.0.0.1:5273 (separate from `npm run dev`, so both can run at once), runs the tests in Chromium, and stops both servers. If either port is busy the run fails with "is already used" instead of testing a stale server. The tests use the supplied examples with explicit cutoffs: loading and displaying a report, a pin overriding an exact match, removing a pin, an earlier cutoff, invalid input, and exporting `manual.csv` and reusing it through the CLI. They also check that the GUI's downloaded `report.json` equals the CLI's for examples 1–3.
+
+Failed tests keep a screenshot, a trace, and an error summary under `test-results/`; passing tests leave nothing behind.
+
+```sh
+npx playwright test -g "cutoff"                    # one scenario by name
+npx playwright test --headed --debug               # watch and step through
+npx playwright show-trace test-results/<test>/trace.zip
+npx playwright show-report                         # HTML report of the last run
+```
 
 ## Architecture
 
@@ -100,8 +122,8 @@ scripts/    dev runner and the examples check
 Imports point inward only (`cli, api -> pipeline -> csv, report -> domain`). The GUI never parses or matches records itself; it sends the files to the API.
 
 - **Exact arithmetic.** Money, FX, and timestamps are parsed straight from strings into `decimal.js` values; nothing passes through `Number`. Timestamps are epoch seconds as decimals, so sub-millisecond input is compared exactly. Values are rounded only when the report is written.
-- **Tiers run globally in order:** manual pins, then exact, then rule-based, each finishing across all records before the next starts. A consumed record cannot join a later pair.
-- **Deterministic selection.** Within a tier, all qualifying pairs are ranked by (|amount diff|, |time diff|, `ours_id`, `theirs_id`) and taken greedily. Input row order never matters.
+- **Tiers run globally in order:** manual pins, then exact, then rule-based, then fuzzy, each finishing across all records before the next starts. A consumed record cannot join a later pair.
+- **Deterministic selection.** Within a tier, all qualifying pairs are ranked by (|amount diff|, |time diff|, `ours_id`, `theirs_id`) and taken greedily; the fuzzy tier ranks by text distance first. Input row order never matters.
 - **Candidate search** sorts `theirs` by timestamp and binary-searches the tolerance window per `ours` record, avoiding a full cross product.
 
 ## Assumptions and supported behavior
@@ -110,6 +132,7 @@ Summarised from [`docs/matching-contract.md`](docs/matching-contract.md):
 
 - Rule-based: `|amount diff| <= 0.01` and `|timestamp diff| <= 1 s`, absolute and inclusive; both configurable per run.
 - Extended records: exact requires all five extended fields equal; rule-based requires `currency`, `party_email`, and `quantity` equal while `price_per_share` and `fx_rate` may drift. A simple record and an extended record can match exactly on amount and timestamp, but never rule-based.
+- Fuzzy: `|amount diff| <= 0.05` (or the rule-based tolerance if larger), timestamp within the rule-based tolerance, and memos at least 90% alike by edit distance, ignoring case and extra whitespace. Extended records also need equal `quantity`, plus either equal `currency` and a 90% alike `party_email`, or (different currencies) an identical `party_email` and base values `amount ÷ fx_rate` within 0.05 instead of the raw amount check. Same-currency pairs, then closer `party_email`, then closer memo win when candidates compete. Empty memos never match fuzzy.
 - Inputs are validated before matching: `amount` and `price_per_share` must have exactly 2 decimal places, `fx_rate` exactly 6; `quantity` > 0, `price_per_share` >= 0, `fx_rate` > 0. A 0-byte `manual.csv` means no pins.
 - Manual pins always win. Identical duplicates are de-duplicated; pins to missing IDs or to records after `as_of` are skipped with a warning; remaining pins that pin one record to two partners fail the run.
 - Unmatched records echo their input fields except `memo` (as in the examples); `quantity` is a JSON number.
@@ -117,7 +140,7 @@ Summarised from [`docs/matching-contract.md`](docs/matching-contract.md):
 
 ## Limitations
 
-- No fuzzy tier yet: `examples/example_4_fuzzy_memo` reports `o-003/t-103` as unmatched instead of fuzzy. This is expected until fuzzy matching is implemented (deferred by the plan); `test/fixtures/example_4_nonfuzzy_expected.json` records the current expectation.
+- Fuzzy similarity is character-based: a one-letter email difference such as `bob@acme.com` vs `rob@acme.com` counts as a typo, so only the amount, time, and memo checks stand between them. Memos under 10 characters must be identical after normalization.
 - Greedy selection does not maximize the number of matches when candidates compete (covered by a named test).
 
 ## AI assistance

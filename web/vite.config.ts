@@ -8,7 +8,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: Number(process.env.WEB_PORT ?? 5173),
     strictPort: true,
-    proxy: { '/reconcile': 'http://127.0.0.1:3001' },
+    proxy: { '/reconcile': `http://127.0.0.1:${process.env.API_PORT ?? 3001}` },
     // The GUI imports shared code from ../src.
     fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] },
   },

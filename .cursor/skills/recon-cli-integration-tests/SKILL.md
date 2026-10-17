@@ -36,8 +36,7 @@ Always copy fixtures into the temp dir. Never pass a path inside `examples/` or 
 
 ## Required tests
 
-- **Examples 1-3:** `toEqual` against the parsed `examples/*/expected_report.json`. Array order matters, so compare whole objects.
-- **Example 4:** a separate test named for its non-fuzzy expectation, for example `'example 4 without fuzzy tier: o-003/t-103 remain unmatched'`. Build the expected value inline or keep it in `test/fixtures/example_4_nonfuzzy_expected.json`. Never modify the supplied file.
+- **Examples 1-4:** `toEqual` against the parsed `examples/*/expected_report.json`. Array order matters, so compare whole objects. Never modify the supplied files.
 - **Determinism:** two runs produce byte-identical `report.json`.
 - **Usage errors:** missing flag, unknown flag, missing `run`, malformed `--as-of`. Assert exit 2 and a helpful stderr.
 - **Input errors:** missing file, malformed CSV, duplicate ID, bad decimal. Assert exit 1 and that stderr names the file, row, and field.

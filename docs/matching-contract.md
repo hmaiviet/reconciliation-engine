@@ -84,7 +84,7 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 - `amount` and `price_per_share`: exactly 2 decimal places; `fx_rate`: exactly 6 (`-?digits.digits`, as ASSIGNMENT specifies). Checked during parsing, before any matching. `quantity`: integer. Extended string fields: non-empty. `id`: non-empty and unique per file.
 - Signs: `amount` may be negative. `quantity` must be > 0, `price_per_share` >= 0, `fx_rate` > 0.
 - `timestamp`: `YYYY-MM-DDTHH:MM:SS[.fraction]Z`, a real calendar date. `--as-of`: exactly the ASSIGNMENT format `YYYY-MM-DDTHH:MM:SS[.sss]Z` (fraction absent or exactly 3 digits); anything else is a usage error, exit 2.
-- `memo` is optional and ignored by exact and rule-based matching; it is reserved for the fuzzy tier.
+- `memo` is optional and ignored by exact and rule-based matching; only the fuzzy tier uses it (D10).
 - Unknown columns are ignored.
 - `manual.csv`: header `ours_id,theirs_id`; header-only or completely empty (0 bytes) means no pins.
 - All errors are collected and reported as `file:row: field: message`, exit 1. `row` is the physical line where the record starts, even when it spans several lines.
@@ -105,7 +105,7 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 ## D8: API contract
 **Status:** agreed
 **Decision:**
-- Local development only: Fastify on `127.0.0.1:3001`, request body limit 10 MiB. The GUI dev server uses `127.0.0.1:5173`, overridable with `WEB_PORT`.
+- Local development only: Fastify on `127.0.0.1:3001`, request body limit 10 MiB. The GUI dev server uses `127.0.0.1:5173`. `API_PORT` and `WEB_PORT` override them; browser tests use 3101 and 5273.
 - `POST /reconcile` with JSON `{ ours, theirs, manual, as_of, tolerances?: { amount?, seconds? } }`. The first three are CSV file contents as strings; errors name them `ours.csv`, `theirs.csv`, `manual.csv`. Unknown properties and non-string values are rejected (no coercion).
 - `200`: `{ report, warnings, tolerances, records: { ours, theirs }, pins }`. `report` is exactly what the CLI writes for the same inputs; `tolerances` echoes the values used; `records` lists every eligible record (D6 echo plus `memo` when the file has that column, sorted by id; `report` itself still omits `memo`); `pins` lists the manual pins without identical duplicates.
 - `400`: `{ errors: [{ file?, row?, field?, message }] }` with every input problem, the same messages the CLI prints for exit 1 and 2. `413` for an oversized body. Anything unexpected is `500` with `internal error` and no details.
@@ -126,6 +126,7 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 - Any eligible record, matched or unmatched, can be pinned. A record that already has a pin cannot be selected, so the GUI never creates a D4 conflict. Pins can be removed; changes apply on the next run.
 - An uploaded `manual.csv` is used for the next run only; after a successful run its pins become the editable pin list and the file input clears. Adding pins is disabled while an uploaded file is pending.
 - Exports: `report.json` is the last run's report, byte-identical to the CLI's; `manual.csv` is the current pin list (header `ours_id,theirs_id`, CSV quoting when needed), so rerunning the CLI with it reproduces the GUI's next report.
+- A "Manual match" mode takes ours and theirs only, lists every record side by side, and lets the user match pairs before the first run (a matched record leaves the tables; cancelling a match puts it back). Its pins are sent as generated `manual.csv` text, so the same pins give the same report as an uploaded file.
 - State lives in the browser tab only; nothing is stored on disk or the server.
 **Examples:**
 | action | result |
@@ -133,3 +134,34 @@ Notation: `o-1 100.00 @10:00:00.000Z` is an `ours` record with amount and timest
 | example 2, pin o-003 to t-103, run | 2 manual matches, 0 unmatched |
 | download `manual.csv`, run the CLI with it | report identical to the GUI's `report.json` |
 | remove that pin, run | back to example 2's expected report |
+
+## D10: Fuzzy tier
+**Status:** agreed
+**Decision:**
+- Runs after rule-based on the records left over, with the same consumption rules.
+- Amount: `|amount diff| <= 0.05`, absolute and inclusive, or the rule-based amount tolerance if that is larger. Timestamp: the rule-based tolerance (D1).
+- Text similarity: edit distance (an adjacent transposition counts as one edit) divided by the longer length, after trimming, lowercasing, and collapsing whitespace. "Similar" means a distance of at most 10%, i.e. at least 90% alike. Two empty strings are not similar.
+- Every fuzzy match needs similar memos. An empty memo on either side means no fuzzy match.
+- Extended records always need equal `quantity`. Then:
+  - **Same currency:** amounts within the tolerance above and a similar `party_email`; `price_per_share` and `fx_rate` may drift as in rule-based (D2).
+  - **Different currencies:** an identical `party_email`, and base values `amount ÷ fx_rate` within the same tolerance (compared at full precision). The raw amount check is skipped, since amounts in different currencies are not comparable.
+- Mixed shapes never match.
+- Candidate ranking: same-currency pairs before cross-currency pairs, then `party_email` distance, then memo distance, then (cross-currency only) base value diff, then D3's (`|amount diff|`, `|timestamp diff|`, `ours_id`, `theirs_id`).
+**Why:** ASSIGNMENT: fuzzy "tolerates small typos in the free-text and party-identity strings (a misspelled `memo` or `party_email`)". Example 4 needs o-003/t-103 (0.03 apart, "Coffee Shop" vs "Cofee Shop") to match fuzzy; example 3's o-003/t-103 (different currency and party) must not. Extended fields carry more weight than memo, so they gate first and rank first. Every example row satisfies `amount = quantity × price_per_share × fx_rate`, so `amount ÷ fx_rate` is the base-currency value both sides share; comparing `quantity × price_per_share × fx_rate` directly would compare numbers in two currencies. Agreeing on currency is stronger evidence, so those pairs rank first.
+**Examples:**
+| ours | theirs | expected |
+| --- | --- | --- |
+| o-1 300.00 "Coffee Shop" | t-1 300.03 "Cofee Shop" | fuzzy (1 edit in 11) |
+| o-1 100.00 "lunch" | t-1 100.05 "lunch" | fuzzy |
+| o-1 100.00 "lunch" | t-1 100.06 "lunch" | unmatched |
+| o-1 100.00 "coffee bar" | t-1 100.02 "cofee bar" | fuzzy (1 edit in 10) |
+| o-1 100.00 "groceries" | t-1 100.02 "grocerias" | unmatched (1 edit in 9) |
+| o-1 100.00 "" | t-1 100.02 "" | unmatched |
+| o-1 alice@acme.com "first-buy" | t-1 alice@acme.con "first-buy", same amount and time | fuzzy |
+| o-1 USD alice "USD-buy" | t-1 EUR carol "euro-side", same amount and time | unmatched |
+| o-1 USD 1×100.00 fx 1.000000, 100.00, alice "first-buy" | t-1 EUR 1×100.00 fx 0.920000, 92.00, alice "first-buy" | fuzzy (base values 100.00 and 100.00) |
+| o-1 as above | t-1 EUR fx 2.000000, 200.12, alice "first-buy" | unmatched (base value diff 0.06) |
+| o-1 as above | t-1 EUR fx 0.920000, 100.00, alice "first-buy" | unmatched (base values 100.00 and 108.70) |
+| o-1 EUR 200×5.00, 1000.00, bob "buy" | t-1 USD 250×4.00, 1000.00, bob "buy" | unmatched (quantity differs; example 3 o-004/t-104 needs its pin) |
+| o-1 "Coffee Shop" | t-1 "Coffee Shop" +0.04, t-2 "Cofee Shop" +0.02 | fuzzy o-1/t-1 (closer memo wins over closer amount) |
+**Tests:** `test/unit/engine.test.ts` > "fuzzy (D10)"

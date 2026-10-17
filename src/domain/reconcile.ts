@@ -17,6 +17,9 @@ export interface Tolerances {
 // D1
 export const DEFAULT_TOLERANCES: Tolerances = { amount: new Decimal('0.01'), seconds: new Decimal('1') };
 const ZERO: Tolerances = { amount: new Decimal(0), seconds: new Decimal(0) };
+// D10: never narrower than the rule-based amount tolerance; time uses the rule-based tolerance.
+const FUZZY_AMOUNT = new Decimal('0.05');
+const MAX_TEXT_DISTANCE = 0.1;
 
 export interface ReconInput {
   ours: Txn[];
@@ -42,12 +45,15 @@ export function reconcile({ ours, theirs, manual, asOf, tolerances = DEFAULT_TOL
   let restOurs = ours.filter((t) => t.timestamp.lte(asOf) && !pinned.has(t));
   let restTheirs = theirs.filter((t) => t.timestamp.lte(asOf) && !pinned.has(t));
 
-  const tiers: [MatchKind, Tolerances, (o: Txn, t: Txn) => boolean][] = [
-    ['exact', ZERO, isExactCompatible],
-    ['rule_based', tolerances, isRuleCompatible],
+  const fuzzyAmount = Decimal.max(FUZZY_AMOUNT, tolerances.amount);
+  const tiers: [MatchKind, Tolerances, Rank][] = [
+    ['exact', ZERO, (o, t) => (isExactCompatible(o, t) ? [] : null)],
+    ['rule_based', tolerances, (o, t) => (isRuleCompatible(o, t) ? [] : null)],
+    // Cross-currency amounts are not comparable, so fuzzyRank applies the amount tolerance itself.
+    ['fuzzy', { amount: new Decimal(Infinity), seconds: tolerances.seconds }, (o, t) => fuzzyRank(o, t, fuzzyAmount)],
   ];
-  for (const [kind, tol, compatible] of tiers) {
-    const found = matchTier(kind, restOurs, restTheirs, tol, compatible);
+  for (const [kind, tol, rank] of tiers) {
+    const found = matchTier(kind, restOurs, restTheirs, tol, rank);
     const used = new Set(found.flatMap((m) => [m.ours, m.theirs]));
     restOurs = restOurs.filter((t) => !used.has(t));
     restTheirs = restTheirs.filter((t) => !used.has(t));
@@ -75,6 +81,46 @@ export function isRuleCompatible(o: Txn, t: Txn): boolean {
 
 function sameIdentity(a: ExtendedFields, b: ExtendedFields): boolean {
   return a.currency === b.currency && a.partyEmail === b.partyEmail && a.quantity === b.quantity;
+}
+
+/** Ranks within a tier before D3's diffs (lower first); null means the pair cannot match in that tier. */
+type Rank = (o: Txn, t: Txn) => number[] | null;
+
+// D10: memo at least 90% similar. Extended records need equal quantity; with equal currency, amounts within tolerance
+// and a 90% similar party_email; with different currencies, an identical party_email and base values within tolerance.
+// Same-currency pairs outrank cross-currency ones, then party_email, then memo. Mixed shapes never match.
+export function fuzzyRank(o: Txn, t: Txn, amountTol: Decimal): number[] | null {
+  const memo = textDistance(o.raw.memo ?? '', t.raw.memo ?? '');
+  if (memo > MAX_TEXT_DISTANCE) return null;
+  const amountClose = o.amount.minus(t.amount).abs().lte(amountTol);
+  const a = o.extended;
+  const b = t.extended;
+  if (!a && !b) return amountClose ? [memo] : null;
+  if (!a || !b || a.quantity !== b.quantity) return null;
+  if (a.currency === b.currency) {
+    const email = textDistance(a.partyEmail, b.partyEmail);
+    return amountClose && email <= MAX_TEXT_DISTANCE ? [0, email, memo, 0] : null;
+  }
+  // amount = quantity × price_per_share × fx_rate (as in every example row), so amount ÷ fx_rate is the shared base value.
+  const baseDiff = o.amount.div(a.fxRate).minus(t.amount.div(b.fxRate)).abs();
+  return a.partyEmail === b.partyEmail && baseDiff.lte(amountTol) ? [1, 0, memo, baseDiff.toNumber()] : null;
+}
+
+/** Edit distance (adjacent transpositions count as one edit) over the longer length, after trimming, lowercasing, and collapsing whitespace. */
+export function textDistance(x: string, y: string): number {
+  const a = [...x.trim().replace(/\s+/g, ' ').toLowerCase()];
+  const b = [...y.trim().replace(/\s+/g, ' ').toLowerCase()];
+  // Two empty strings carry no evidence, so they count as fully different.
+  if (!a.length && !b.length) return 1;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i ? (j ? 0 : i) : j)));
+  for (let i = 1; i <= a.length; i++) {
+    const row = d[i]!;
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(d[i - 1]![j]! + 1, row[j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) row[j] = Math.min(row[j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]! / Math.max(a.length, b.length);
 }
 
 export function compareIds(a: string, b: string): number {
@@ -131,12 +177,13 @@ function resolvePins(manual: ManualPair[], ours: Txn[], theirs: Txn[], asOf: Dec
 interface Candidate {
   ours: Txn;
   theirs: Txn;
+  rank: number[];
   amountDiff: Decimal;
   timeDiff: Decimal;
 }
 
 // D3: rank all qualifying pairs globally, then take them greedily.
-function matchTier(kind: MatchKind, ours: Txn[], theirs: Txn[], tol: Tolerances, compatible: (o: Txn, t: Txn) => boolean): Match[] {
+function matchTier(kind: MatchKind, ours: Txn[], theirs: Txn[], tol: Tolerances, rankOf: Rank): Match[] {
   const byTime = [...theirs].sort((a, b) => a.timestamp.cmp(b.timestamp));
   const candidates: Candidate[] = [];
   for (const o of ours) {
@@ -145,13 +192,13 @@ function matchTier(kind: MatchKind, ours: Txn[], theirs: Txn[], tol: Tolerances,
       const t = byTime[i]!;
       if (t.timestamp.gt(latest)) break;
       const amountDiff = o.amount.minus(t.amount).abs();
-      if (amountDiff.lte(tol.amount) && compatible(o, t)) {
-        candidates.push({ ours: o, theirs: t, amountDiff, timeDiff: o.timestamp.minus(t.timestamp).abs() });
-      }
+      const rank = amountDiff.lte(tol.amount) ? rankOf(o, t) : null;
+      if (rank) candidates.push({ ours: o, theirs: t, rank, amountDiff, timeDiff: o.timestamp.minus(t.timestamp).abs() });
     }
   }
   candidates.sort(
     (a, b) =>
+      compareRanks(a.rank, b.rank) ||
       a.amountDiff.cmp(b.amountDiff) ||
       a.timeDiff.cmp(b.timeDiff) ||
       compareIds(a.ours.id, b.ours.id) ||
@@ -166,6 +213,11 @@ function matchTier(kind: MatchKind, ours: Txn[], theirs: Txn[], tol: Tolerances,
     matches.push({ kind, ours: c.ours, theirs: c.theirs });
   }
   return matches;
+}
+
+function compareRanks(a: number[], b: number[]): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
+  return 0;
 }
 
 function firstAtOrAfter(sorted: Txn[], time: Decimal): number {

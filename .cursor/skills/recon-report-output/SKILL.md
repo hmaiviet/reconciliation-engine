@@ -19,7 +19,7 @@ description: Builds report.json from engine results - summary counts, signed amo
 }
 ```
 
-- Always include all six summary keys. `matched_fuzzy` is `0` until the fuzzy tier exists.
+- Always include all six summary keys, even when a count is `0`.
 - Normalize `as_of` to millisecond form, as in the ASSIGNMENT.md schema example (`2026-04-28T14:00:00.000Z`): `--as-of` has either no fraction or exactly 3 digits, so append `.000` when it is absent (contract D5, D7). Build the string from the input; do not re-serialize it through `Date`.
 
 ## Values
